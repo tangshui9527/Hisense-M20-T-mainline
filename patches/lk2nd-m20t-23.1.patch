@@ -60,7 +60,7 @@ index b44a5c2..b57fc58 100644
  #endif
  		boot_linux_from_mmc();
  	}
-@@ -5652,6 +5675,15 @@ void aboot_init(const struct app_descriptor *app)
+@@ -5652,6 +5675,18 @@ void aboot_init(const struct app_descriptor *app)
  normal_boot:
  	if (!boot_into_fastboot)
  	{
@@ -72,11 +72,14 @@ index b44a5c2..b57fc58 100644
 +		m20t_preboot();
 +		if (boot_into_fastboot)
 +			goto fastboot;
++		/* 60 s boot menu: volume keys pick a target; on timeout
++		 * cmd_continue boots the target selected above. */
++		display_fastboot_menu();
 +#endif
  #if WITH_LK2ND_BOOT
  		if (!boot_into_recovery)
  			lk2nd_boot();
-@@ -5723,6 +5755,10 @@ retry_boot:
+@@ -5723,6 +5758,10 @@ retry_boot:
  
  fastboot:
  	/* We are here means regular boot did not happen. Start fastboot. */
@@ -140,7 +143,29 @@ index 28ab377..bba1cca 100644
  
  #include "../device.h"
  
-@@ -121,12 +124,20 @@ static uint16_t wait_key(void)
+@@ -88,15 +91,19 @@ static uint16_t lk2nd_boot_pressed_key(void)
+ 	return 0;
+ }
+ 
+ #define LONG_PRESS_DURATION 1000
+ 
+-static uint16_t wait_key(void)
++static uint16_t wait_key(bool with_timeout)
+ {
+ 	uint16_t keycode = 0;
+ 	int press_start = 0;
+ 	int press_duration;
++	unsigned ticks = 0;
+ 
+-	while (!(keycode = lk2nd_boot_pressed_key()))
++	while (!(keycode = lk2nd_boot_pressed_key())) {
++		if (with_timeout && ++ticks > 60000)	/* ~60 s @ 1 ms */
++			return 0;
+ 		thread_sleep(1);
++	}
+ 
+ 	press_start = current_time();
+@@ -121,12 +128,20 @@ static uint16_t wait_key(void)
  #define xstr(s) str(s)
  #define str(s) #s
  
@@ -164,7 +189,7 @@ index 28ab377..bba1cca 100644
  	boot_into_recovery = 1;
  	cmd_continue(NULL, NULL, 0);
  }
-@@ -140,8 +151,8 @@ static struct {
+@@ -140,8 +155,8 @@ static struct {
  	void (*action)(void);
  } menu_options[] = {
  	{ "  Reboot  ", GREEN,  opt_reboot },
@@ -175,6 +200,18 @@ index 28ab377..bba1cca 100644
  	{ "Bootloader", ORANGE, opt_bootloader },
  	{ "    EDL   ", RED,    opt_edl },
  	{ " Shutdown ", RED,    opt_shutdown },
+@@ -259,7 +274,10 @@
+ 
+ 		fbcon_flush();
+ 
+-		switch (wait_key()) {
++		switch (wait_key(true)) {
++		case 0:		/* menu timeout: boot the stored default target */
++			cmd_continue(NULL, NULL, 0);
++			return;
+ 		case KEY_POWER:
+ 			y = y_menu + incr * sel;
+ 			fbcon_printf_ln(
 diff --git a/lk2nd/include/lk2nd/m20t.h b/lk2nd/include/lk2nd/m20t.h
 new file mode 100644
 index 0000000..9541328
@@ -536,50 +573,3 @@ index 630d538..745fd20 100644
 +
 +# Hisense M20-T boot control (Android default target, fastboot fallback)
 +MODULES += lk2nd/m20t
-93c93
-< static uint16_t wait_key(void)
----
-> static uint16_t wait_key(bool with_timeout)
-97a98
-> 	unsigned ticks = 0;
-99c100,102
-< 	while (!(keycode = lk2nd_boot_pressed_key()))
----
-> 	while (!(keycode = lk2nd_boot_pressed_key())) {
-> 		if (with_timeout && ++ticks > 60000)	/* ~60 s @ 1 ms */
-> 			return 0;
-100a104
-> 	}
-124c128,134
-< static void opt_continue(void)   { cmd_continue(NULL, NULL, 0); }
----
-> static void opt_continue(void)
-> {
-> #if WITH_LK2ND_M20T
-> 	m20t_set_default(M20T_TARGET_LINUX);
-> #endif
-> 	cmd_continue(NULL, NULL, 0);
-> }
-126c136
-< static void opt_recovery(void)
----
-> static void opt_android(void)
-129c139,141
-< 
----
-> #if WITH_LK2ND_M20T
-> 	m20t_set_default(M20T_TARGET_ANDROID);
-> #endif
-141a154,155
-> 	{ " Android  ", GREEN,  opt_android },
-> 	{ "  Linux   ", WHITE,  opt_continue },
-143,144d156
-< 	{ " Continue ", WHITE,  opt_continue },
-< 	{ " Recovery ", ORANGE, opt_recovery },
-262c274,277
-< 		switch (wait_key()) {
----
-> 		switch (wait_key(true)) {
-> 		case 0:		/* menu timeout: boot the selected default (Android) */
-> 			menu_options[sel].action();
-> 			return;
