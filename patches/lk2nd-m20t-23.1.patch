@@ -536,3 +536,50 @@ index 630d538..745fd20 100644
 +
 +# Hisense M20-T boot control (Android default target, fastboot fallback)
 +MODULES += lk2nd/m20t
+93c93
+< static uint16_t wait_key(void)
+---
+> static uint16_t wait_key(bool with_timeout)
+97a98
+> 	unsigned ticks = 0;
+99c100,102
+< 	while (!(keycode = lk2nd_boot_pressed_key()))
+---
+> 	while (!(keycode = lk2nd_boot_pressed_key())) {
+> 		if (with_timeout && ++ticks > 5000)	/* ~5 s @ 1 ms */
+> 			return 0;
+100a104
+> 	}
+124c128,134
+< static void opt_continue(void)   { cmd_continue(NULL, NULL, 0); }
+---
+> static void opt_continue(void)
+> {
+> #if WITH_LK2ND_M20T
+> 	m20t_set_default(M20T_TARGET_LINUX);
+> #endif
+> 	cmd_continue(NULL, NULL, 0);
+> }
+126c136
+< static void opt_recovery(void)
+---
+> static void opt_android(void)
+129c139,141
+< 
+---
+> #if WITH_LK2ND_M20T
+> 	m20t_set_default(M20T_TARGET_ANDROID);
+> #endif
+141a154,155
+> 	{ " Android  ", GREEN,  opt_android },
+> 	{ "  Linux   ", WHITE,  opt_continue },
+143,144d156
+< 	{ " Continue ", WHITE,  opt_continue },
+< 	{ " Recovery ", ORANGE, opt_recovery },
+262c274,277
+< 		switch (wait_key()) {
+---
+> 		switch (wait_key(true)) {
+> 		case 0:		/* menu timeout: boot the selected default (Android) */
+> 			menu_options[sel].action();
+> 			return;
