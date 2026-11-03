@@ -33,6 +33,30 @@ busybox mount -t configfs none     /config
 
 LOG=/tmp/boot.log
 
+# --- clear lk2nd boot-failure marker ----------------------------------------
+# lk2nd counts Linux boot attempts in the boot partition (offset 31 MiB + 4,
+# see docs/lk2nd-m20t-design.md). Reaching this init at all means the kernel
+# booted, so the counter must go back to zero -- otherwise a working image
+# would eventually be treated as failing and land in fastboot.
+clear_lk2nd_attempts() {
+    for uevent in /sys/class/block/mmcblk0p*/uevent; do
+        [ -e "$uevent" ] || continue
+        grep -q '^PARTNAME=boot$' "$uevent" || continue
+        blk="/dev/$(basename "$(dirname "$uevent")")"
+        [ -b "$blk" ] || continue
+        if busybox dd if=/dev/zero of="$blk" bs=1 seek=32505860 count=1 \
+                conv=notrunc 2>/dev/null; then
+            echo "lk2nd: boot attempt counter cleared on $blk" >> $LOG
+        else
+            echo "lk2nd: could not clear boot attempt counter on $blk" >> $LOG
+        fi
+        return 0
+    done
+    echo "lk2nd: boot partition not found, attempt counter untouched" >> $LOG
+    return 0
+}
+clear_lk2nd_attempts
+
 setup_ncm() {
     mkdir -p /config/usb_gadget/g1 || { echo "configfs mkdir failed" >> $LOG; return 1; }
     cd /config/usb_gadget/g1

@@ -1,0 +1,527 @@
+diff --git a/app/aboot/aboot.c b/app/aboot/aboot.c
+index b44a5c2..6bcfc68 100644
+--- a/app/aboot/aboot.c
++++ b/app/aboot/aboot.c
+@@ -105,6 +105,9 @@
+ #if WITH_LK2ND_BOOT
+ #include <lk2nd/boot.h>
+ #endif
++#if WITH_LK2ND_M20T
++#include <lk2nd/m20t.h>
++#endif
+ 
+ extern  bool target_use_signed_kernel(void);
+ extern void platform_uninit(void);
+@@ -3469,6 +3472,11 @@ void cmd_boot(const char *arg, void *data, unsigned sz)
+ 	thread_sleep(LK2ND_FASTBOOT_DELAY);
+ 	#endif
+ 
++#if WITH_LK2ND_M20T
++	/* "fastboot boot" is a Linux boot: let it count as a failed attempt if it hangs. */
++	m20t_count_attempt();
++#endif
++
+ 	boot_linux((void*) hdr->kernel_addr, (void*) hdr->tags_addr,
+ 		   (const char*) hdr->cmdline, board_machtype(),
+ 		   (void*) hdr->ramdisk_addr, hdr->ramdisk_size,
+@@ -4337,6 +4345,12 @@ void cmd_flash_mmc_sparse_img(const char *arg, void *data, unsigned sz)
+ 		fastboot_fail("sparse image write failure");
+ 	}
+ 
++#if WITH_LK2ND_M20T
++	/* A successful "flash boot" means Linux is the image to try next. */
++	if (total_blocks == sparse_header->total_blks)
++		m20t_flash_hook(pname);
++#endif
++
+ 	fastboot_okay("");
+ 	return;
+ }
+@@ -4672,6 +4686,11 @@ void cmd_continue(const char *arg, void *data, unsigned sz)
+ #if WITH_LK2ND_BOOT
+ 		if (!boot_into_recovery)
+ 			lk2nd_boot();
++#endif
++#if WITH_LK2ND_M20T
++		/* A Linux boot started on purpose still counts against the retry limit. */
++		if (!boot_into_recovery)
++			m20t_count_attempt();
+ #endif
+ 		boot_linux_from_mmc();
+ 	}
+@@ -5652,6 +5671,15 @@ void aboot_init(const struct app_descriptor *app)
+ normal_boot:
+ 	if (!boot_into_fastboot)
+ 	{
++#if WITH_LK2ND_M20T
++		/*
++		 * Apply the stored boot target (linux/android/fastboot) and fall
++		 * back to fastboot after too many failed Linux attempts.
++		 */
++		m20t_preboot();
++		if (boot_into_fastboot)
++			goto fastboot;
++#endif
+ #if WITH_LK2ND_BOOT
+ 		if (!boot_into_recovery)
+ 			lk2nd_boot();
+@@ -5723,6 +5751,10 @@ retry_boot:
+ 
+ fastboot:
+ 	/* We are here means regular boot did not happen. Start fastboot. */
++#if WITH_LK2ND_M20T
++	/* Reaching fastboot is a safe state: never carry stale failure counts. */
++	m20t_reset_attempts();
++#endif
+ 
+ 	/* register aboot specific fastboot commands */
+ 	fastboot_register_commands();
+diff --git a/lk2nd/device/dts/msm8909/msm8909-hisense-m20t.dts b/lk2nd/device/dts/msm8909/msm8909-hisense-m20t.dts
+new file mode 100644
+index 0000000..ff09eb4
+--- /dev/null
++++ b/lk2nd/device/dts/msm8909/msm8909-hisense-m20t.dts
+@@ -0,0 +1,21 @@
++// SPDX-License-Identifier: BSD-3-Clause
++
++#include <skeleton32.dtsi>
++#include <lk2nd.dtsi>
++
++/ {
++	qcom,msm-id = <QCOM_ID_MSM8909 0>;
++	/*
++	 * Hisense M20-T reports the QRD board id (0xf5 / 0x1000b) with subtype 0.
++	 * The stock QCDT table only carries subtype 8 for this board id, hence the
++	 * single-byte QCDT patch that made the original lk2nd image boot here.
++	 */
++	qcom,board-id = <QCOM_BOARD_ID(QRD, 0x01, 0) 0x0>;
++};
++
++&lk2nd {
++	hisense-m20t {
++		model = "Hisense M20-T";
++		compatible = "hisense,m20t";
++	};
++};
+diff --git a/lk2nd/device/dts/msm8909/rules.mk b/lk2nd/device/dts/msm8909/rules.mk
+index 0b05bb8..ed6fa45 100644
+--- a/lk2nd/device/dts/msm8909/rules.mk
++++ b/lk2nd/device/dts/msm8909/rules.mk
+@@ -7,6 +7,7 @@ QCDTBS += \
+ 	$(LOCAL_DIR)/msm8905-qrd-skub.dtb \
+ 	$(LOCAL_DIR)/msm8909-1gb-qrd-skuc.dtb \
+ 	$(LOCAL_DIR)/msm8909-1gb-qrd-skue.dtb \
++	$(LOCAL_DIR)/msm8909-hisense-m20t.dtb \
+ 	$(LOCAL_DIR)/msm8909-huawei-scale.dtb \
+ 	$(LOCAL_DIR)/msm8909-mtp.dtb \
+ 	$(LOCAL_DIR)/msm8909-zte-sapphire.dtb \
+diff --git a/lk2nd/device/menu/menu.c b/lk2nd/device/menu/menu.c
+index 28ab377..bba1cca 100644
+--- a/lk2nd/device/menu/menu.c
++++ b/lk2nd/device/menu/menu.c
+@@ -15,6 +15,9 @@
+ #include <lk2nd/device/keys.h>
+ #include <lk2nd/util/minmax.h>
+ #include <lk2nd/version.h>
++#if WITH_LK2ND_M20T
++#include <lk2nd/m20t.h>
++#endif
+ 
+ #include "../device.h"
+ 
+@@ -121,12 +124,20 @@ static uint16_t wait_key(void)
+ #define xstr(s) str(s)
+ #define str(s) #s
+ 
+-static void opt_continue(void)   { cmd_continue(NULL, NULL, 0); }
++static void opt_continue(void)
++{
++#if WITH_LK2ND_M20T
++	m20t_set_default(M20T_TARGET_LINUX);
++#endif
++	cmd_continue(NULL, NULL, 0);
++}
+ static void opt_reboot(void)     { reboot_device(0); }
+-static void opt_recovery(void)
++static void opt_android(void)
+ {
+ 	extern unsigned boot_into_recovery;
+-
++#if WITH_LK2ND_M20T
++	m20t_set_default(M20T_TARGET_ANDROID);
++#endif
+ 	boot_into_recovery = 1;
+ 	cmd_continue(NULL, NULL, 0);
+ }
+@@ -140,8 +151,8 @@ static struct {
+ 	void (*action)(void);
+ } menu_options[] = {
+ 	{ "  Reboot  ", GREEN,  opt_reboot },
+-	{ " Continue ", WHITE,  opt_continue },
+-	{ " Recovery ", ORANGE, opt_recovery },
++	{ " Android  ", GREEN,  opt_android },
++	{ "  Linux   ", WHITE,  opt_continue },
+ 	{ "Bootloader", ORANGE, opt_bootloader },
+ 	{ "    EDL   ", RED,    opt_edl },
+ 	{ " Shutdown ", RED,    opt_shutdown },
+diff --git a/lk2nd/include/lk2nd/m20t.h b/lk2nd/include/lk2nd/m20t.h
+new file mode 100644
+index 0000000..9541328
+--- /dev/null
++++ b/lk2nd/include/lk2nd/m20t.h
+@@ -0,0 +1,31 @@
++// SPDX-License-Identifier: BSD-3-Clause
++/* Hisense M20-T boot control: Android slot + boot failure fallback to fastboot. */
++
++#ifndef LK2ND_M20T_H
++#define LK2ND_M20T_H
++
++#include <sys/types.h>
++
++#define M20T_TARGET_LINUX	0
++#define M20T_TARGET_ANDROID	1
++#define M20T_TARGET_FASTBOOT	2
++
++/* Called at normal_boot: applies the stored default target and falls back to
++ * fastboot once the Linux slot exhausted its boot attempts. */
++void m20t_preboot(void);
++
++/* Count one more Linux boot attempt (for boots started from fastboot/menu). */
++void m20t_count_attempt(void);
++
++/* Clear the attempt counter (entering fastboot, Android reached, image flashed). */
++void m20t_reset_attempts(void);
++
++/* Persist the default boot target. Returns true on success. */
++bool m20t_set_default(uint8_t target);
++
++/* Hook for fastboot flash: "boot" selects Linux, "recovery" leaves it alone. */
++void m20t_flash_hook(const char *pname);
++
++const char *m20t_target_name(uint8_t target);
++
++#endif /* LK2ND_M20T_H */
+diff --git a/lk2nd/m20t/m20t.c b/lk2nd/m20t/m20t.c
+new file mode 100644
+index 0000000..afad842
+--- /dev/null
++++ b/lk2nd/m20t/m20t.c
+@@ -0,0 +1,295 @@
++// SPDX-License-Identifier: BSD-3-Clause
++/*
++ * Hisense M20-T boot control.
++ *
++ * Two jobs:
++ *  1. Allow "Android" as the default boot target. The stock Android boot image
++ *     lives in the "recovery" partition, the "boot" partition (+512 KiB after
++ *     lk2nd) is the Linux test slot.
++ *  2. Count Linux boot attempts in the last usable sector region of the "boot"
++ *     partition. If the Linux image hangs, the watchdog resets the SoC, lk2nd
++ *     runs again, sees attempts >= max and stops in fastboot instead of looping
++ *     forever. The initramfs clears the counter once userspace is reachable.
++ *
++ * State block: boot partition offset 31 MiB, one 512-byte sector. Anything that
++ * rewrites the whole boot partition (EDL restore) resets it to defaults, which
++ * is exactly the desired behaviour.
++ */
++
++#include <compiler.h>
++#include <debug.h>
++#include <fastboot.h>
++#include <mmc.h>
++#include <partition_parser.h>
++#include <stdlib.h>
++#include <string.h>
++
++#include <lk2nd/m20t.h>
++
++extern bool boot_into_fastboot;
++extern unsigned boot_into_recovery;
++
++#define M20T_STATE_MAGIC	0x4d323054u	/* "M20T" */
++#define M20T_STATE_OFFSET	(31u * 1024u * 1024u)
++#define M20T_STATE_SIZE		512u
++#define M20T_DEFAULT_ATTEMPTS	2u
++#define M20T_ATTEMPT_CAP	254u
++
++struct m20t_state {
++	uint32_t magic;
++	uint8_t attempts;
++	uint8_t max_attempts;
++	uint8_t def_target;
++	uint8_t rsvd;
++	uint32_t inv_magic;
++} __attribute__((packed));
++
++static uint8_t m20t_sector[M20T_STATE_SIZE] __attribute__((aligned(8)));
++static uint64_t m20t_addr;
++static bool m20t_ready;
++static bool m20t_checked;
++
++const char *m20t_target_name(uint8_t target)
++{
++	switch (target) {
++	case M20T_TARGET_ANDROID:
++		return "android";
++	case M20T_TARGET_FASTBOOT:
++		return "fastboot";
++	default:
++		return "linux";
++	}
++}
++
++static bool m20t_resolve(void)
++{
++	int index;
++
++	if (m20t_checked)
++		return m20t_ready;
++	m20t_checked = true;
++
++	/* "lk2nd" is the split-off head of the boot partition: same base address. */
++	index = partition_get_index("lk2nd");
++	if (index == INVALID_PTN)
++		index = partition_get_index("boot");
++	if (index == INVALID_PTN) {
++		dprintf(INFO, "M20T: no boot partition, boot control disabled\n");
++		return false;
++	}
++
++	if (partition_get_size(index) < M20T_STATE_OFFSET + M20T_STATE_SIZE) {
++		dprintf(CRITICAL, "M20T: boot partition too small for state block\n");
++		return false;
++	}
++
++	mmc_set_lun(partition_get_lun(index));
++	m20t_addr = partition_get_offset(index) + M20T_STATE_OFFSET;
++	m20t_ready = true;
++	return true;
++}
++
++/* Fill *s with the persisted state, or with defaults if it cannot be read. */
++static bool m20t_load(struct m20t_state *s)
++{
++	struct m20t_state def = {
++		.magic = M20T_STATE_MAGIC,
++		.attempts = 0,
++		.max_attempts = M20T_DEFAULT_ATTEMPTS,
++		.def_target = M20T_TARGET_LINUX,
++		.rsvd = 0,
++		.inv_magic = ~M20T_STATE_MAGIC,
++	};
++
++	*s = def;
++
++	if (!m20t_resolve())
++		return false;
++	if (mmc_read(m20t_addr, (uint32_t *)m20t_sector, M20T_STATE_SIZE))
++		return false;
++
++	memcpy(s, m20t_sector, sizeof(*s));
++	if (s->magic != M20T_STATE_MAGIC || s->inv_magic != ~M20T_STATE_MAGIC)
++		return false;
++	if (!s->max_attempts || s->max_attempts > M20T_ATTEMPT_CAP)
++		s->max_attempts = M20T_DEFAULT_ATTEMPTS;
++	if (s->def_target > M20T_TARGET_FASTBOOT)
++		s->def_target = M20T_TARGET_LINUX;
++	s->rsvd = 0;
++
++	return true;
++}
++
++static void m20t_store(const struct m20t_state *in)
++{
++	struct m20t_state s = *in;
++
++	if (!m20t_ready)
++		return;
++
++	s.magic = M20T_STATE_MAGIC;
++	s.inv_magic = ~M20T_STATE_MAGIC;
++	s.rsvd = 0;
++
++	memset(m20t_sector, 0, sizeof(m20t_sector));
++	memcpy(m20t_sector, &s, sizeof(s));
++	if (mmc_write(m20t_addr, M20T_STATE_SIZE, m20t_sector))
++		dprintf(CRITICAL, "M20T: failed to update state block\n");
++}
++
++void m20t_reset_attempts(void)
++{
++	struct m20t_state s;
++
++	m20t_load(&s);
++	if (!s.attempts)
++		return;
++	s.attempts = 0;
++	m20t_store(&s);
++}
++
++void m20t_count_attempt(void)
++{
++	struct m20t_state s;
++
++	m20t_load(&s);
++	if (s.attempts >= M20T_ATTEMPT_CAP)
++		return;
++	s.attempts++;
++	m20t_store(&s);
++}
++
++bool m20t_set_default(uint8_t target)
++{
++	struct m20t_state s;
++
++	if (target > M20T_TARGET_FASTBOOT)
++		return false;
++
++	m20t_load(&s);
++	if (!m20t_ready)
++		return false;
++
++	s.def_target = target;
++	if (target != M20T_TARGET_LINUX)
++		s.attempts = 0;
++	m20t_store(&s);
++
++	dprintf(ALWAYS, "M20T: default boot target = %s\n", m20t_target_name(target));
++	return true;
++}
++
++void m20t_flash_hook(const char *pname)
++{
++	if (!pname || strcmp(pname, "boot"))
++		return;
++
++	/*
++	 * Flashing the Linux slot is an explicit "boot this next" request: make
++	 * sure a stale "android" default does not hide the freshly written image.
++	 */
++	m20t_set_default(M20T_TARGET_LINUX);
++}
++
++void m20t_preboot(void)
++{
++	struct m20t_state s;
++	bool persisted = m20t_load(&s);
++
++	/* Android recovery already requested (menu, misc command, key combo). */
++	if (boot_into_recovery) {
++		dprintf(ALWAYS, "M20T: booting Android (recovery partition)\n");
++		if (persisted && s.attempts) {
++			s.attempts = 0;
++			m20t_store(&s);
++		}
++		return;
++	}
++
++	if (s.attempts >= s.max_attempts) {
++		dprintf(ALWAYS, "M20T: %u/%u Linux boot attempts failed, "
++			"falling back to fastboot\n", s.attempts, s.max_attempts);
++		s.attempts = 0;
++		m20t_store(&s);
++		boot_into_fastboot = true;
++		return;
++	}
++
++	switch (s.def_target) {
++	case M20T_TARGET_ANDROID:
++		dprintf(ALWAYS, "M20T: default target android, booting recovery\n");
++		if (persisted && s.attempts) {
++			s.attempts = 0;
++			m20t_store(&s);
++		}
++		boot_into_recovery = 1;
++		return;
++	case M20T_TARGET_FASTBOOT:
++		dprintf(ALWAYS, "M20T: default target fastboot\n");
++		if (persisted && s.attempts) {
++			s.attempts = 0;
++			m20t_store(&s);
++		}
++		boot_into_fastboot = true;
++		return;
++	default:
++		break;
++	}
++
++	/* Linux: remember this attempt before handing over to the kernel. */
++	dprintf(ALWAYS, "M20T: Linux boot attempt %u/%u\n",
++		s.attempts + 1, s.max_attempts);
++	if (s.attempts < M20T_ATTEMPT_CAP) {
++		s.attempts++;
++		m20t_store(&s);
++	}
++}
++
++static void cmd_oem_m20t_state(const char *arg, void *data, unsigned sz)
++{
++	struct m20t_state s;
++	char reply[96];
++
++	m20t_load(&s);
++	snprintf(reply, sizeof(reply), "attempts=%u/%u default=%s",
++		 s.attempts, s.max_attempts, m20t_target_name(s.def_target));
++	fastboot_okay(reply);
++}
++
++static void cmd_oem_m20t_reset(const char *arg, void *data, unsigned sz)
++{
++	m20t_reset_attempts();
++	fastboot_okay("attempts cleared");
++}
++
++static void cmd_oem_m20t_default(const char *arg, void *data, unsigned sz)
++{
++	uint8_t target;
++
++	if (!arg || !arg[0]) {
++		fastboot_fail("usage: oem m20t-default <linux|android|fastboot>");
++		return;
++	}
++
++	if (!strcmp(arg, "linux"))
++		target = M20T_TARGET_LINUX;
++	else if (!strcmp(arg, "android"))
++		target = M20T_TARGET_ANDROID;
++	else if (!strcmp(arg, "fastboot"))
++		target = M20T_TARGET_FASTBOOT;
++	else {
++		fastboot_fail("unknown target (linux|android|fastboot)");
++		return;
++	}
++
++	if (!m20t_set_default(target)) {
++		fastboot_fail("state block unavailable");
++		return;
++	}
++
++	fastboot_okay(m20t_target_name(target));
++}
++
++FASTBOOT_REGISTER("oem m20t-state", cmd_oem_m20t_state);
++FASTBOOT_REGISTER("oem m20t-reset", cmd_oem_m20t_reset);
++FASTBOOT_REGISTER("oem m20t-default", cmd_oem_m20t_default);
+diff --git a/lk2nd/m20t/rules.mk b/lk2nd/m20t/rules.mk
+new file mode 100644
+index 0000000..4732dbe
+--- /dev/null
++++ b/lk2nd/m20t/rules.mk
+@@ -0,0 +1,6 @@
++# SPDX-License-Identifier: BSD-3-Clause
++LOCAL_DIR := $(GET_LOCAL_DIR)
++
++OBJS += $(LOCAL_DIR)/m20t.o
++
++DEFINES += WITH_LK2ND_M20T=1
+diff --git a/project/lk2nd-msm8909.mk b/project/lk2nd-msm8909.mk
+index 630d538..745fd20 100644
+--- a/project/lk2nd-msm8909.mk
++++ b/project/lk2nd-msm8909.mk
+@@ -1,3 +1,6 @@
+ # SPDX-License-Identifier: BSD-3-Clause
+ TARGET := msm8909
+ include lk2nd/project/lk2nd.mk
++
++# Hisense M20-T boot control (Android default target, fastboot fallback)
++MODULES += lk2nd/m20t

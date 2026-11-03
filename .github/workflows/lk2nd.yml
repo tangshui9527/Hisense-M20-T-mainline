@@ -1,0 +1,71 @@
+name: lk2nd
+
+# Builds the M20-T lk2nd image (Android menu entry + fastboot fallback)
+# on GitHub Actions. Nothing is built locally on the developer machine.
+on:
+  push:
+    branches: [main, lk2nd-m20t]
+    paths:
+      - "patches/lk2nd-*.patch"
+      - "tools/check-qcdt.py"
+      - ".github/workflows/lk2nd.yml"
+  workflow_dispatch:
+
+env:
+  LK2ND_REPO: https://github.com/msm8916-mainline/lk2nd.git
+  LK2ND_TAG: 23.1
+  PROJECT: lk2nd-msm8909
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q \
+            build-essential gcc-arm-none-eabi device-tree-compiler \
+            libfdt-dev swig python3-dev python3-pip
+          pip3 install --break-system-packages pylibfdt
+          arm-none-eabi-gcc --version | head -1
+          python3 -c "import libfdt; print('libfdt', libfdt.__file__)"
+
+      - name: Clone lk2nd ${{ env.LK2ND_TAG }}
+        run: |
+          git clone --depth 1 --branch "$LK2ND_TAG" "$LK2ND_REPO" lk2nd
+          cd lk2nd
+          git log -1 --format="lk2nd %H %cs %s" | tee ../lk2nd-info.txt
+
+      - name: Apply M20-T patch
+        run: |
+          cd lk2nd
+          git apply -v ../patches/lk2nd-m20t-23.1.patch
+          grep -n "M20T_TARGET_ANDROID" lk2nd/include/lk2nd/m20t.h
+          grep -n "m20t_preboot" app/aboot/aboot.c
+          grep -n "hisense-m20t" lk2nd/device/dts/msm8909/rules.mk
+
+      - name: Build lk2nd
+        run: |
+          cd lk2nd
+          make -j"$(nproc)" TOOLCHAIN_PREFIX=arm-none-eabi- "$PROJECT" 2>&1 | tail -40
+          ls -l "build-$PROJECT/lk2nd.img"
+
+      - name: Check QCDT board id
+        run: |
+          python3 tools/check-qcdt.py "lk2nd/build-$PROJECT/lk2nd.img" | tee qcdt-check.txt
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p out
+          cp "lk2nd/build-$PROJECT/lk2nd.img" out/lk2nd-m20t.img
+          cp lk2nd-info.txt qcdt-check.txt out/
+          md5sum out/lk2nd-m20t.img | tee out/lk2nd-m20t.img.md5
+          sha256sum out/lk2nd-m20t.img >> out/lk2nd-m20t.img.md5
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lk2nd-m20t
+          path: out/
+          retention-days: 90
