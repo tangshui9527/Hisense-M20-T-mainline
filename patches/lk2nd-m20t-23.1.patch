@@ -151,7 +151,7 @@ index 0b05bb8..ed6fa45 100644
  	$(LOCAL_DIR)/msm8909-mtp.dtb \
  	$(LOCAL_DIR)/msm8909-zte-sapphire.dtb \
 diff --git a/lk2nd/device/menu/menu.c b/lk2nd/device/menu/menu.c
-index 28ab377..015b20f 100644
+index 28ab377..45000eb 100644
 --- a/lk2nd/device/menu/menu.c
 +++ b/lk2nd/device/menu/menu.c
 @@ -15,6 +15,9 @@
@@ -164,28 +164,36 @@ index 28ab377..015b20f 100644
  
  #include "../device.h"
  
-@@ -90,14 +93,18 @@ static uint16_t lk2nd_boot_pressed_key(void)
+@@ -90,14 +93,26 @@ static uint16_t lk2nd_boot_pressed_key(void)
  
  #define LONG_PRESS_DURATION 1000
  
 -static uint16_t wait_key(void)
++/* Boot menu auto-continue (M20-T: boots the stored default target). */
++#define M20T_MENU_TIMEOUT_MS 30000
++
 +static uint16_t wait_key(bool with_timeout)
  {
  	uint16_t keycode = 0;
  	int press_start = 0;
  	int press_duration;
-+	unsigned ticks = 0;
++	int start = current_time();
  
 -	while (!(keycode = lk2nd_boot_pressed_key()))
++	/*
++	 * Wall-clock deadline, not a tick counter: thread_sleep(1) takes ~10 ms
++	 * on this platform, which turned a tick-based 60 s budget into a ~10 min
++	 * wait in practice (user-verified on the M20-T).
++	 */
 +	while (!(keycode = lk2nd_boot_pressed_key())) {
-+		if (with_timeout && ++ticks > 60000)	/* ~60 s @ 1 ms */
++		if (with_timeout && current_time() - start > M20T_MENU_TIMEOUT_MS)
 +			return 0;
  		thread_sleep(1);
 +	}
  
  	press_start = current_time();
  
-@@ -121,7 +128,13 @@ static uint16_t wait_key(void)
+@@ -121,7 +136,13 @@ static uint16_t wait_key(void)
  #define xstr(s) str(s)
  #define str(s) #s
  
@@ -200,7 +208,7 @@ index 28ab377..015b20f 100644
  static void opt_reboot(void)     { reboot_device(0); }
  static void opt_recovery(void)
  {
-@@ -130,6 +143,13 @@ static void opt_recovery(void)
+@@ -130,6 +151,13 @@ static void opt_recovery(void)
  	boot_into_recovery = 1;
  	cmd_continue(NULL, NULL, 0);
  }
@@ -214,7 +222,7 @@ index 28ab377..015b20f 100644
  static void opt_bootloader(void) { reboot_device(FASTBOOT_MODE); }
  static void opt_edl(void)        { reboot_device(EMERGENCY_DLOAD); }
  static void opt_shutdown(void)   { shutdown_device(); }
-@@ -140,8 +160,9 @@ static struct {
+@@ -140,8 +168,9 @@ static struct {
  	void (*action)(void);
  } menu_options[] = {
  	{ "  Reboot  ", GREEN,  opt_reboot },
@@ -225,7 +233,7 @@ index 28ab377..015b20f 100644
  	{ "Bootloader", ORANGE, opt_bootloader },
  	{ "    EDL   ", RED,    opt_edl },
  	{ " Shutdown ", RED,    opt_shutdown },
-@@ -259,7 +280,10 @@ void display_fastboot_menu(void)
+@@ -259,7 +288,10 @@ void display_fastboot_menu(void)
  
  		fbcon_flush();
  
@@ -284,10 +292,10 @@ index 0000000..30a901a
 +#endif /* LK2ND_M20T_H */
 diff --git a/lk2nd/m20t/m20t.c b/lk2nd/m20t/m20t.c
 new file mode 100644
-index 0000000..8c6eb8c
+index 0000000..bbcb345
 --- /dev/null
 +++ b/lk2nd/m20t/m20t.c
-@@ -0,0 +1,300 @@
+@@ -0,0 +1,301 @@
 +// SPDX-License-Identifier: BSD-3-Clause
 +/*
 + * Hisense M20-T boot control.
@@ -481,6 +489,7 @@ index 0000000..8c6eb8c
 +	 * sure a stale "android" default does not hide the freshly written image.
 +	 */
 +	m20t_set_default(M20T_TARGET_LINUX);
++	m20t_reset_attempts();
 +}
 +
 +void m20t_preboot(void)
