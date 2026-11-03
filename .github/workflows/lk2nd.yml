@@ -47,14 +47,20 @@ jobs:
           grep -n "hisense-m20t" lk2nd/device/dts/msm8909/rules.mk
 
       - name: Build lk2nd
+        shell: bash
         run: |
+          set -o pipefail
           cd lk2nd
           make -j"$(nproc)" TOOLCHAIN_PREFIX=arm-none-eabi- "$PROJECT" 2>&1 | tail -40
           ls -l "build-$PROJECT/lk2nd.img"
 
       - name: Check QCDT board id
+        shell: bash
         run: |
+          set -o pipefail
           python3 tools/check-qcdt.py "lk2nd/build-$PROJECT/lk2nd.img" | tee qcdt-check.txt
+          strings "lk2nd/build-$PROJECT/lk2nd.img" | grep -q "Hisense M20-T"
+          echo "device model string present"
 
       - name: Collect artifacts
         run: |

@@ -4,22 +4,31 @@
 # The Hisense M20-T reports qcom,msm-id = 245 (0xf5) and
 # qcom,board-id = 0x1000b with subtype 0. The stock image only had subtype 8,
 # which is why the old image needed a one-byte binary patch.
+#
+# QCDT entry layout (lk2nd/scripts/dtbTool):
+#   version 1: plat, variant, subtype, soc_rev, offset, size ... 5 words
+#   version 2: plat, variant, subtype, soc_rev, offset, size ... 6 words
+#   version 3: ... + 4 pmic ids ............................... 10 words
 
 import struct
 import sys
 
-QCDT_MAGIC = 0x54444351  # "QCDT"
-EXPECT_SOC = 245
+EXPECT_SOC = 245        # 0xf5, msm8909
 EXPECT_VARIANT = 0x1000B
 EXPECT_SUBTYPE = 0
+
+HEADER_WORDS = 3
+ENTRY_WORDS = {1: 5, 2: 6, 3: 10}
+
 
 def find_qcdt(data):
     for off in range(0, len(data) - 12, 4):
         if data[off:off + 4] == b"QCDT":
             magic, version, count = struct.unpack_from("<III", data, off)
-            if magic == QCDT_MAGIC and 0 < count < 200:
+            if magic == 0x54444351 and version in ENTRY_WORDS and 0 < count < 200:
                 return off, version, count
     return None, None, None
+
 
 def main(path):
     with open(path, "rb") as f:
@@ -30,17 +39,19 @@ def main(path):
         print("FAIL: no QCDT table found")
         return 1
 
-    print(f"QCDT at 0x{off:x}, version {version}, {count} entries")
+    words = ENTRY_WORDS[version]
+    print(f"QCDT at 0x{off:x}, version {version}, {count} entries, {words} words each")
+
     match = False
     for i in range(count):
-        e = off + 12 + i * 40
-        (platform, variant, subtype, soc_rev,
-         pmic0, pmic1, pmic2, pmic3, dtb_off, dtb_size) = struct.unpack_from(
-             "<10I", data, e)
-        ok = platform == EXPECT_SOC and variant == EXPECT_VARIANT and subtype == EXPECT_SUBTYPE
+        entry = struct.unpack_from(f"<{words}I", data, off + 12 + i * words * 4)
+        plat, variant, subtype, soc_rev = entry[:4]
+        dtb_off, dtb_size = entry[-2], entry[-1]
+        ok = (plat == EXPECT_SOC and variant == EXPECT_VARIANT
+              and subtype == EXPECT_SUBTYPE)
         match |= ok
-        print(f"  [{i:2d}] soc=0x{platform:02x} variant=0x{variant:06x} "
-              f"subtype=0x{subtype:02x} pmic=({pmic0:08x},{pmic1:08x}) "
+        print(f"  [{i:2d}] soc=0x{plat:02x} variant=0x{variant:06x} "
+              f"subtype=0x{subtype:02x} rev=0x{soc_rev:x} "
               f"dtb=0x{dtb_off:x}+0x{dtb_size:x}"
               f"{'  <== M20-T' if ok else ''}")
 
@@ -50,6 +61,7 @@ def main(path):
 
     print("OK: M20-T board id present")
     return 0
+
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
