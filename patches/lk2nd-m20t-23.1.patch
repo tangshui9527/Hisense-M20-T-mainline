@@ -1,5 +1,5 @@
 diff --git a/app/aboot/aboot.c b/app/aboot/aboot.c
-index b44a5c2..b57fc58 100644
+index b44a5c2..69d951f 100644
 --- a/app/aboot/aboot.c
 +++ b/app/aboot/aboot.c
 @@ -105,6 +105,9 @@
@@ -48,7 +48,9 @@ index b44a5c2..b57fc58 100644
  	fastboot_okay("");
  	return;
  }
-@@ -4680,16 +4698,31 @@ void cmd_continue(const char *arg, void *data, unsigned sz)
+@@ -4660,8 +4678,18 @@ void cmd_flash(const char *arg, void *data, unsigned sz)
+ 
+ void cmd_continue(const char *arg, void *data, unsigned sz)
  {
 -	fastboot_okay("");
 -	fastboot_stop();
@@ -67,22 +69,19 @@ index b44a5c2..b57fc58 100644
  
  	if (target_is_emmc_boot())
  	{
- #if FBCON_DISPLAY_MSG
- 		/* Exit keys' detection thread firstly */
- 		exit_menu_keys_detection();
- #endif
+@@ -4672,6 +4700,11 @@ void cmd_continue(const char *arg, void *data, unsigned sz)
  #if WITH_LK2ND_BOOT
  		if (!boot_into_recovery)
  			lk2nd_boot();
- #endif
++#endif
 +#if WITH_LK2ND_M20T
 +		/* A Linux boot started on purpose still counts against the retry limit. */
 +		if (!boot_into_recovery)
 +			m20t_count_attempt();
-+#endif
+ #endif
  		boot_linux_from_mmc();
  	}
-@@ -5652,6 +5675,18 @@ void aboot_init(const struct app_descriptor *app)
+@@ -5652,6 +5685,18 @@ void aboot_init(const struct app_descriptor *app)
  normal_boot:
  	if (!boot_into_fastboot)
  	{
@@ -101,7 +100,7 @@ index b44a5c2..b57fc58 100644
  #if WITH_LK2ND_BOOT
  		if (!boot_into_recovery)
  			lk2nd_boot();
-@@ -5723,6 +5758,10 @@ retry_boot:
+@@ -5723,6 +5768,10 @@ retry_boot:
  
  fastboot:
  	/* We are here means regular boot did not happen. Start fastboot. */
@@ -152,7 +151,7 @@ index 0b05bb8..ed6fa45 100644
  	$(LOCAL_DIR)/msm8909-mtp.dtb \
  	$(LOCAL_DIR)/msm8909-zte-sapphire.dtb \
 diff --git a/lk2nd/device/menu/menu.c b/lk2nd/device/menu/menu.c
-index 28ab377..bba1cca 100644
+index 28ab377..015b20f 100644
 --- a/lk2nd/device/menu/menu.c
 +++ b/lk2nd/device/menu/menu.c
 @@ -15,6 +15,9 @@
@@ -165,9 +164,7 @@ index 28ab377..bba1cca 100644
  
  #include "../device.h"
  
-@@ -88,15 +91,19 @@ static uint16_t lk2nd_boot_pressed_key(void)
- 	return 0;
- }
+@@ -90,14 +93,18 @@ static uint16_t lk2nd_boot_pressed_key(void)
  
  #define LONG_PRESS_DURATION 1000
  
@@ -187,7 +184,8 @@ index 28ab377..bba1cca 100644
 +	}
  
  	press_start = current_time();
-@@ -121,12 +128,20 @@ static uint16_t wait_key(void)
+ 
+@@ -121,7 +128,13 @@ static uint16_t wait_key(void)
  #define xstr(s) str(s)
  #define str(s) #s
  
@@ -200,29 +198,34 @@ index 28ab377..bba1cca 100644
 +	cmd_continue(NULL, NULL, 0);
 +}
  static void opt_reboot(void)     { reboot_device(0); }
--static void opt_recovery(void)
-+static void opt_android(void)
+ static void opt_recovery(void)
  {
- 	extern unsigned boot_into_recovery;
--
-+#if WITH_LK2ND_M20T
-+	m20t_set_default(M20T_TARGET_ANDROID);
-+#endif
+@@ -130,6 +143,13 @@ static void opt_recovery(void)
  	boot_into_recovery = 1;
  	cmd_continue(NULL, NULL, 0);
  }
-@@ -140,8 +155,8 @@ static struct {
++static void opt_android(void)
++{
++#if WITH_LK2ND_M20T
++	m20t_set_default(M20T_TARGET_ANDROID);
++#endif
++	cmd_continue(NULL, NULL, 0);
++}
+ static void opt_bootloader(void) { reboot_device(FASTBOOT_MODE); }
+ static void opt_edl(void)        { reboot_device(EMERGENCY_DLOAD); }
+ static void opt_shutdown(void)   { shutdown_device(); }
+@@ -140,8 +160,9 @@ static struct {
  	void (*action)(void);
  } menu_options[] = {
  	{ "  Reboot  ", GREEN,  opt_reboot },
 -	{ " Continue ", WHITE,  opt_continue },
--	{ " Recovery ", ORANGE, opt_recovery },
+ 	{ " Recovery ", ORANGE, opt_recovery },
 +	{ " Android  ", GREEN,  opt_android },
 +	{ "  Linux   ", WHITE,  opt_continue },
  	{ "Bootloader", ORANGE, opt_bootloader },
  	{ "    EDL   ", RED,    opt_edl },
  	{ " Shutdown ", RED,    opt_shutdown },
-@@ -259,7 +274,10 @@
+@@ -259,7 +280,10 @@ void display_fastboot_menu(void)
  
  		fbcon_flush();
  
@@ -236,12 +239,20 @@ index 28ab377..bba1cca 100644
  			fbcon_printf_ln(
 diff --git a/lk2nd/include/lk2nd/m20t.h b/lk2nd/include/lk2nd/m20t.h
 new file mode 100644
-index 0000000..9541328
+index 0000000..30a901a
 --- /dev/null
 +++ b/lk2nd/include/lk2nd/m20t.h
-@@ -0,0 +1,31 @@
+@@ -0,0 +1,39 @@
 +// SPDX-License-Identifier: BSD-3-Clause
-+/* Hisense M20-T boot control: Android slot + boot failure fallback to fastboot. */
++/* Hisense M20-T boot control.
++ *
++ * Targets: LINUX  = second-stage slot, boot attempts counted, falls back to
++ *                    fastboot after repeated failures (mainline test slot).
++ *          ANDROID = second-stage slot without counting (daily driver).
++ *          FASTBOOT = stop in fastboot.
++ * The recovery partition keeps the stock recovery image; boot_into_recovery
++ * (menu/misc) boots it in recovery mode. */
++
 +
 +#ifndef LK2ND_M20T_H
 +#define LK2ND_M20T_H
@@ -256,7 +267,7 @@ index 0000000..9541328
 + * fastboot once the Linux slot exhausted its boot attempts. */
 +void m20t_preboot(void);
 +
-+/* Count one more Linux boot attempt (for boots started from fastboot/menu). */
++/* Count one more Linux boot attempt (no-op unless Linux is the default). */
 +void m20t_count_attempt(void);
 +
 +/* Clear the attempt counter (entering fastboot, Android reached, image flashed). */
@@ -273,10 +284,10 @@ index 0000000..9541328
 +#endif /* LK2ND_M20T_H */
 diff --git a/lk2nd/m20t/m20t.c b/lk2nd/m20t/m20t.c
 new file mode 100644
-index 0000000..afad842
+index 0000000..8c6eb8c
 --- /dev/null
 +++ b/lk2nd/m20t/m20t.c
-@@ -0,0 +1,295 @@
+@@ -0,0 +1,300 @@
 +// SPDX-License-Identifier: BSD-3-Clause
 +/*
 + * Hisense M20-T boot control.
@@ -432,6 +443,8 @@ index 0000000..afad842
 +	struct m20t_state s;
 +
 +	m20t_load(&s);
++	if (s.def_target != M20T_TARGET_LINUX)
++		return;		/* daily-driver Android boots must not trip the fallback */
 +	if (s.attempts >= M20T_ATTEMPT_CAP)
 +		return;
 +	s.attempts++;
@@ -496,12 +509,15 @@ index 0000000..afad842
 +
 +	switch (s.def_target) {
 +	case M20T_TARGET_ANDROID:
-+		dprintf(ALWAYS, "M20T: default target android, booting recovery\n");
++		/*
++		 * Daily-driver Android: boot the second-stage slot like Linux
++		 * but WITHOUT attempt counting (no fastboot fallback).
++		 */
++		dprintf(ALWAYS, "M20T: default target android (second stage)\n");
 +		if (persisted && s.attempts) {
 +			s.attempts = 0;
 +			m20t_store(&s);
 +		}
-+		boot_into_recovery = 1;
 +		return;
 +	case M20T_TARGET_FASTBOOT:
 +		dprintf(ALWAYS, "M20T: default target fastboot\n");
