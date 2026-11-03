@@ -1,5 +1,5 @@
 diff --git a/app/aboot/aboot.c b/app/aboot/aboot.c
-index b44a5c2..6bcfc68 100644
+index b44a5c2..b57fc58 100644
 --- a/app/aboot/aboot.c
 +++ b/app/aboot/aboot.c
 @@ -105,6 +105,9 @@
@@ -24,20 +24,31 @@ index b44a5c2..6bcfc68 100644
  	boot_linux((void*) hdr->kernel_addr, (void*) hdr->tags_addr,
  		   (const char*) hdr->cmdline, board_machtype(),
  		   (void*) hdr->ramdisk_addr, hdr->ramdisk_size,
-@@ -4337,6 +4345,12 @@ void cmd_flash_mmc_sparse_img(const char *arg, void *data, unsigned sz)
+@@ -3976,6 +3984,10 @@ void cmd_flash_mmc_img(const char *arg, void *data, unsigned sz)
+ 			}
+ 		}
+ 	}
++#if WITH_LK2ND_M20T
++	/* A successful "flash boot" means Linux is the image to try next. */
++	m20t_flash_hook(pname);
++#endif
+ 	fastboot_okay("");
+ 	return;
+ }
+@@ -4337,6 +4349,12 @@ void cmd_flash_mmc_sparse_img(const char *arg, void *data, unsigned sz)
  		fastboot_fail("sparse image write failure");
  	}
  
 +#if WITH_LK2ND_M20T
 +	/* A successful "flash boot" means Linux is the image to try next. */
 +	if (total_blocks == sparse_header->total_blks)
-+		m20t_flash_hook(pname);
++		m20t_flash_hook(arg);
 +#endif
 +
  	fastboot_okay("");
  	return;
  }
-@@ -4672,6 +4686,11 @@ void cmd_continue(const char *arg, void *data, unsigned sz)
+@@ -4672,6 +4690,11 @@ void cmd_continue(const char *arg, void *data, unsigned sz)
  #if WITH_LK2ND_BOOT
  		if (!boot_into_recovery)
  			lk2nd_boot();
@@ -49,7 +60,7 @@ index b44a5c2..6bcfc68 100644
  #endif
  		boot_linux_from_mmc();
  	}
-@@ -5652,6 +5671,15 @@ void aboot_init(const struct app_descriptor *app)
+@@ -5652,6 +5675,15 @@ void aboot_init(const struct app_descriptor *app)
  normal_boot:
  	if (!boot_into_fastboot)
  	{
@@ -65,7 +76,7 @@ index b44a5c2..6bcfc68 100644
  #if WITH_LK2ND_BOOT
  		if (!boot_into_recovery)
  			lk2nd_boot();
-@@ -5723,6 +5751,10 @@ retry_boot:
+@@ -5723,6 +5755,10 @@ retry_boot:
  
  fastboot:
  	/* We are here means regular boot did not happen. Start fastboot. */
