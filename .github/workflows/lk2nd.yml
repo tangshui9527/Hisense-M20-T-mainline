@@ -66,6 +66,10 @@ jobs:
         run: |
           mkdir -p out
           cp "lk2nd/build-$PROJECT/lk2nd.img" out/lk2nd-m20t.img
+          # probe (2026-11-04): builds differing only in the menu timeout
+          # constant produced byte-identical images; ship the disassembly +
+          # symbol table so the compiled wait_key() can be inspected directly.
+          cp "lk2nd/build-$PROJECT/lk.lst" "lk2nd/build-$PROJECT/lk.sym" out/ 2>/dev/null || true
           cp lk2nd-info.txt qcdt-check.txt out/
           md5sum out/lk2nd-m20t.img | tee out/lk2nd-m20t.img.md5
           sha256sum out/lk2nd-m20t.img >> out/lk2nd-m20t.img.md5
