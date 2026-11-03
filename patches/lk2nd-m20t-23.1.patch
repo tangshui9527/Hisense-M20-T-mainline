@@ -151,7 +151,7 @@ index 0b05bb8..ed6fa45 100644
  	$(LOCAL_DIR)/msm8909-mtp.dtb \
  	$(LOCAL_DIR)/msm8909-zte-sapphire.dtb \
 diff --git a/lk2nd/device/menu/menu.c b/lk2nd/device/menu/menu.c
-index 28ab377..45000eb 100644
+index 28ab377..a62f0ac 100644
 --- a/lk2nd/device/menu/menu.c
 +++ b/lk2nd/device/menu/menu.c
 @@ -15,6 +15,9 @@
@@ -222,17 +222,22 @@ index 28ab377..45000eb 100644
  static void opt_bootloader(void) { reboot_device(FASTBOOT_MODE); }
  static void opt_edl(void)        { reboot_device(EMERGENCY_DLOAD); }
  static void opt_shutdown(void)   { shutdown_device(); }
-@@ -140,8 +168,9 @@ static struct {
+@@ -139,12 +167,13 @@ static struct {
+ 	unsigned color;
  	void (*action)(void);
  } menu_options[] = {
- 	{ "  Reboot  ", GREEN,  opt_reboot },
+-	{ "  Reboot  ", GREEN,  opt_reboot },
 -	{ " Continue ", WHITE,  opt_continue },
- 	{ " Recovery ", ORANGE, opt_recovery },
 +	{ " Android  ", GREEN,  opt_android },
+ 	{ " Recovery ", ORANGE, opt_recovery },
 +	{ "  Linux   ", WHITE,  opt_continue },
  	{ "Bootloader", ORANGE, opt_bootloader },
  	{ "    EDL   ", RED,    opt_edl },
  	{ " Shutdown ", RED,    opt_shutdown },
++	{ "  Reboot  ", GREEN,  opt_reboot },
+ };
+ 
+ #define fbcon_printf_ln(color, y, incr, x...) \
 @@ -259,7 +288,10 @@ void display_fastboot_menu(void)
  
  		fbcon_flush();
@@ -292,10 +297,10 @@ index 0000000..30a901a
 +#endif /* LK2ND_M20T_H */
 diff --git a/lk2nd/m20t/m20t.c b/lk2nd/m20t/m20t.c
 new file mode 100644
-index 0000000..bbcb345
+index 0000000..35e3257
 --- /dev/null
 +++ b/lk2nd/m20t/m20t.c
-@@ -0,0 +1,301 @@
+@@ -0,0 +1,306 @@
 +// SPDX-License-Identifier: BSD-3-Clause
 +/*
 + * Hisense M20-T boot control.
@@ -309,7 +314,7 @@ index 0000000..bbcb345
 + *     runs again, sees attempts >= max and stops in fastboot instead of looping
 + *     forever. The initramfs clears the counter once userspace is reachable.
 + *
-+ * State block: boot partition offset 31 MiB, one 512-byte sector. Anything that
++ * State block: LAST sector of the boot partition, one 512-byte sector. Anything that
 + * rewrites the whole boot partition (EDL restore) resets it to defaults, which
 + * is exactly the desired behaviour.
 + */
@@ -328,7 +333,6 @@ index 0000000..bbcb345
 +extern unsigned boot_into_recovery;
 +
 +#define M20T_STATE_MAGIC	0x4d323054u	/* "M20T" */
-+#define M20T_STATE_OFFSET	(31u * 1024u * 1024u)
 +#define M20T_STATE_SIZE		512u
 +#define M20T_DEFAULT_ATTEMPTS	2u
 +#define M20T_ATTEMPT_CAP	254u
@@ -367,22 +371,28 @@ index 0000000..bbcb345
 +		return m20t_ready;
 +	m20t_checked = true;
 +
-+	/* "lk2nd" is the split-off head of the boot partition: same base address. */
-+	index = partition_get_index("lk2nd");
++	/*
++	 * The GPT declares the boot partition 31 MiB (not 32) and lk2nd also
++	 * exposes a 512 KiB virtual "lk2nd" partition; both made the old fixed
++	 * 31 MiB state offset fail the size check (or land past the partition
++	 * end). Use the LAST sector of the real boot partition instead.
++	 */
++	index = partition_get_index("boot");
 +	if (index == INVALID_PTN)
-+		index = partition_get_index("boot");
++		index = partition_get_index("lk2nd");
 +	if (index == INVALID_PTN) {
 +		dprintf(INFO, "M20T: no boot partition, boot control disabled\n");
 +		return false;
 +	}
 +
-+	if (partition_get_size(index) < M20T_STATE_OFFSET + M20T_STATE_SIZE) {
++	if (partition_get_size(index) < 2u * 1024u * 1024u) {
 +		dprintf(CRITICAL, "M20T: boot partition too small for state block\n");
 +		return false;
 +	}
 +
 +	mmc_set_lun(partition_get_lun(index));
-+	m20t_addr = partition_get_offset(index) + M20T_STATE_OFFSET;
++	m20t_addr = partition_get_offset(index) + partition_get_size(index)
++		    - M20T_STATE_SIZE;
 +	m20t_ready = true;
 +	return true;
 +}
