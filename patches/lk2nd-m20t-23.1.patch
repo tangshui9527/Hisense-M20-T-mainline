@@ -48,16 +48,38 @@ index b44a5c2..b57fc58 100644
  	fastboot_okay("");
  	return;
  }
-@@ -4672,6 +4690,11 @@ void cmd_continue(const char *arg, void *data, unsigned sz)
+@@ -4680,16 +4698,31 @@ void cmd_continue(const char *arg, void *data, unsigned sz)
+ {
+-	fastboot_okay("");
+-	fastboot_stop();
++#if WITH_LK2ND_M20T
++	/*
++	 * The 60 s boot menu calls cmd_continue() before fastboot_init():
++	 * usb_if.udc_stop is still NULL there and fastboot_stop() would
++	 * jump through a NULL pointer and crash every boot.
++	 */
++	if (boot_into_fastboot)
++#endif
++	{
++		fastboot_okay("");
++		fastboot_stop();
++	}
+ 
+ 	if (target_is_emmc_boot())
+ 	{
+ #if FBCON_DISPLAY_MSG
+ 		/* Exit keys' detection thread firstly */
+ 		exit_menu_keys_detection();
+ #endif
  #if WITH_LK2ND_BOOT
  		if (!boot_into_recovery)
  			lk2nd_boot();
-+#endif
+ #endif
 +#if WITH_LK2ND_M20T
 +		/* A Linux boot started on purpose still counts against the retry limit. */
 +		if (!boot_into_recovery)
 +			m20t_count_attempt();
- #endif
++#endif
  		boot_linux_from_mmc();
  	}
 @@ -5652,6 +5675,18 @@ void aboot_init(const struct app_descriptor *app)
