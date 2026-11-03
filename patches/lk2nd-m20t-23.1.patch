@@ -546,7 +546,7 @@ index 630d538..745fd20 100644
 < 	while (!(keycode = lk2nd_boot_pressed_key()))
 ---
 > 	while (!(keycode = lk2nd_boot_pressed_key())) {
-> 		if (with_timeout && ++ticks > 5000)	/* ~5 s @ 1 ms */
+> 		if (with_timeout && ++ticks > 60000)	/* ~60 s @ 1 ms */
 > 			return 0;
 100a104
 > 	}
