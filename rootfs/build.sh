@@ -168,6 +168,25 @@ UDC=$(ls /sys/class/udc 2>/dev/null | head -1)
 EOF
 chmod +x "$TARGET/etc/local.d/usb-gadget.start"
 
+# Cellular modem autostart: firmware lives on the modem partition (vfat);
+# mss PIL (qcom_q6v5_mss) loads mba.mbn + modem.mdt/bXX from /lib/firmware.
+cat <<'EOF' > "$TARGET/etc/local.d/modem.start"
+#!/bin/sh
+[ -d /sys/class/remoteproc/remoteproc1 ] || { modprobe qcom_q6v5_mss 2>/dev/null; sleep 1; }
+R=/sys/class/remoteproc/remoteproc1
+[ -d $R ] || exit 0
+[ "$(cat $R/state)" = "running" ] && exit 0
+FW=/lib/firmware
+if [ ! -f $FW/modem.mdt ] || [ ! -f $FW/modem.b22 ]; then
+    mkdir -p /mnt/modem
+    mount -t vfat -o ro /dev/mmcblk0p1 /mnt/modem 2>/dev/null && \
+        cp /mnt/modem/image/mba.mbn /mnt/modem/image/modem.* $FW/ 2>/dev/null
+    umount /mnt/modem 2>/dev/null
+fi
+echo start > $R/state 2>/dev/null
+EOF
+chmod +x "$TARGET/etc/local.d/modem.start"
+
 # eMMC longevity: noatime root + weekly fstrim
 echo "/dev/mmcblk0p29	/	ext4	defaults,noatime	0 1" > "$TARGET/etc/fstab"
 mkdir -p "$TARGET/etc/periodic/weekly"
