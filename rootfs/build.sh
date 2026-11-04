@@ -106,13 +106,14 @@ iface lo inet loopback
 
 auto wlan0
 iface wlan0 inet dhcp
+    pre-up ip link set wlan0 address 00:0a:f5:2f:33:9c
     wpa-conf /etc/wpa_supplicant/wpa_supplicant.conf
 EOF
 
 # Dropbear configuration: enable password auth, allow root
 mkdir -p "$TARGET/etc/dropbear"
 mkdir -p "$TARGET/etc/conf.d"
-echo 'DROPBEAR_OPTS="-R -w -g"' > "$TARGET/etc/conf.d/dropbear"
+echo 'DROPBEAR_OPTS="-R"' > "$TARGET/etc/conf.d/dropbear"
 
 # Enable USB serial console on ttyGS0 and UART console on ttyMSM0
 cat <<'EOF' >> "$TARGET/etc/inittab"

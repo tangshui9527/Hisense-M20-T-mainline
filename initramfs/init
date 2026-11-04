@@ -103,9 +103,9 @@ if [ -d "$NEWROOT" ] && [ -b "$USERDATA" ]; then
             busybox cp -a /lib/modules/* "$NEWROOT/lib/modules/" 2>/dev/null || true
         fi
 
-        # Extract Wi-Fi firmware from modem (p1) and system (p21)
+        # Extract Wi-Fi firmware from modem (p1), system (p21), and persist (p22)
         klog "Extracting Wi-Fi firmware from on-device partitions..."
-        mkdir -p /mnt_p1 /mnt_p21
+        mkdir -p /mnt_p1 /mnt_p21 /mnt_persist
         if busybox mount -r -t vfat /dev/mmcblk0p1 /mnt_p1 2>/dev/null; then
             mkdir -p "$NEWROOT/lib/firmware"
             busybox cp -f /mnt_p1/image/wcnss.* "$NEWROOT/lib/firmware/" 2>/dev/null || true
@@ -115,6 +115,11 @@ if [ -d "$NEWROOT" ] && [ -b "$USERDATA" ]; then
             mkdir -p "$NEWROOT/lib/firmware/wlan/prima"
             busybox cp -f /mnt_p21/etc/firmware/wlan/prima/WCNSS* "$NEWROOT/lib/firmware/wlan/prima/" 2>/dev/null || true
             busybox umount /mnt_p21 2>/dev/null || true
+        fi
+        if busybox mount -r -t ext4 /dev/mmcblk0p22 /mnt_persist 2>/dev/null; then
+            mkdir -p "$NEWROOT/lib/firmware/wlan/prima"
+            busybox cp -f /mnt_persist/WCNSS_qcom_wlan_nv.bin "$NEWROOT/lib/firmware/wlan/prima/" 2>/dev/null || true
+            busybox umount /mnt_persist 2>/dev/null || true
         fi
 
         busybox sync
