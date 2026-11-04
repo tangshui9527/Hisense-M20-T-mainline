@@ -2,7 +2,7 @@ name: build
 
 on:
   push:
-    branches: [main]
+    branches: [main, lk2nd-m20t]
     paths-ignore:
       - "docs/**"
       - "README.md"
@@ -15,7 +15,7 @@ env:
   KERNEL_REPO: https://github.com/weikaizhi4/linux
   KERNEL_COMMIT: 410d5647742474d7ed3eaa1b12aef09df18c2633
   CROSS: arm-linux-gnueabihf-
-  DTB: qcom-msm8909-zu02-dw01
+  DTB: qcom-msm8909-hisense-m20t
 
 jobs:
   kernel:
@@ -58,11 +58,13 @@ jobs:
           git apply ../kernel-early-markers.patch
           grep -c "0x8f000000" arch/arm/boot/compressed/misc.c
 
-      - name: Apply board DTS (zu02-dw01, proven on soc_id 245)
+      - name: Apply board DTS
         run: |
           cd linux
           git apply ../patches-msm8909-zu02-dw01.patch
-          grep -n zu02 arch/arm/boot/dts/qcom/Makefile
+          cp ../device/qcom-msm8909-hisense-m20t.dts arch/arm/boot/dts/qcom/
+          sed -i '/qcom-msm8909-zu02-dw01.dtb/a \\tqcom-msm8909-hisense-m20t.dtb \\' arch/arm/boot/dts/qcom/Makefile
+          grep -n hisense-m20t arch/arm/boot/dts/qcom/Makefile
 
       - name: Configure (ufi210 reference config + initramfs overrides)
         run: |
@@ -127,10 +129,8 @@ jobs:
       - name: Pack boot image
         run: |
           # Boot under lk2nd (QCDT-wrapped DTB; lk2nd's fastboot boot requires
-          # the dtbTool table, same as the stock aboot). nokia-leo variant = a
-          # PROVEN 8909 board dts from the same tree, for board-vs-SoC bisection:
-          # both boots append to the same RAM console buffer at 0x8f001000.
-          for BOARD in $DTB qcom-msm8909-nokia-leo; do
+          # the dtbTool table, same as the stock aboot).
+          for BOARD in $DTB qcom-msm8909-zu02-dw01 qcom-msm8909-nokia-leo; do
             python3 tools/wrap-dt-qcdt.py wrap \
               linux/arch/arm/boot/dts/qcom/$BOARD.dtb $BOARD.qcdt
             python3 tools/mkbootimg.py \
@@ -146,7 +146,7 @@ jobs:
       - name: Collect artifacts
         run: |
           mkdir -p out
-          cp m20t-$DTB.img m20t-qcom-msm8909-nokia-leo.img \
+          cp m20t-*.img \
              linux/arch/arm/boot/zImage \
              linux/arch/arm/boot/dts/qcom/$DTB.dtb \
              initramfs/initramfs.cpio.gz \

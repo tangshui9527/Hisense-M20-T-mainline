@@ -39,31 +39,64 @@
 	};
 
 	/*
- * Memory node MUST be named plain "memory" (no unit address). The stock aboot
- * update_device_tree() does fdt_path_offset("/memory") + fdt_setprop(reg) to
- * inject the detected DDR size (reverse-engineered 2026-10-31, aboot
- * @0x8f613414: "/memory" string @0x4d3b0; "memory@80000000" does NOT match
- * that exact-path lookup). With the dtsi's "memory@80000000" placeholder
- * (reg size 0) the injection is skipped and the kernel boots with zero RAM.
- * The dtsi placeholder node stays around (zero-size, ignored by the kernel);
- * the 1 GiB value below is only a fallback in case injection is skipped.
- */
-memory {
-	device_type = "memory";
-	reg = <0x80000000 0x40000000>;
-};
-
-reserved-memory {
-	/* Debug log buffer: earlyprintk (DEBUG_LL, patched to a RAM console)
-	 * appends the early boot log here. Plain reserved (linear-mapped,
-	 * excluded from the allocator) so the kernel can write it through the
-	 * direct map and stock Android can read it back via /dev/mem for
-	 * post-mortem of early hangs. Free on this device (stock carveouts top
-	 * out at 0x8c100000). */
-	ramlog@8f000000 {
-		reg = <0x8f000000 0x100000>;
+	 * MSM8909 Hisense M20-T Physical Memory Map:
+	 * Verified directly from live Android 4.4 /proc/iomem and dtb17:
+	 * Bank 0: 0x80000000 - 0x87bfffff (124 MB System RAM)
+	 * Hole:   0x87c00000 - 0x8c5fffff (74 MB: TrustZone, Modem 65MB, Peripheral 5MB)
+	 * Bank 1: 0x8c600000 - 0xbfffffff (826 MB System RAM)
+	 *
+	 * Both 'memory' and 'memory@80000000' are declared:
+	 * 1) 'memory' (plain) satisfies lk2nd's fdt_path_offset("/memory")
+	 * 2) 'memory@80000000' satisfies standard OF/FDT unit-address conventions.
+	 */
+	memory {
+		device_type = "memory";
+		reg = <0x80000000 0x07c00000>,
+		      <0x8c600000 0x33a00000>;
 	};
-};
+
+	memory@80000000 {
+		device_type = "memory";
+		reg = <0x80000000 0x07c00000>,
+		      <0x8c600000 0x33a00000>;
+	};
+
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		/* External image reserve (4MB) */
+		external_image: extimg@87c00000 {
+			reg = <0x87c00000 0x00400000>;
+			no-map;
+		};
+
+		/* Modem/ADSP baseband firmware (65MB) - TrustZone XPU protected! */
+		modem_adsp: modem@88000000 {
+			reg = <0x88000000 0x04100000>;
+			no-map;
+		};
+
+		/* Peripheral subsystem (5MB) - TrustZone protected! */
+		peripheral: periph@8c100000 {
+			reg = <0x8c100000 0x00500000>;
+			no-map;
+		};
+
+		/* Debug log buffer: earlyprintk (DEBUG_LL, patched to a RAM console) */
+		ramlog@8f000000 {
+			reg = <0x8f000000 0x00100000>;
+		};
+
+		/* Ramoops / PStore at top of RAM (1MB at 0xbff00000) */
+		ramoops: ramoops@bff00000 {
+			compatible = "ramoops";
+			reg = <0xbff00000 0x00100000>;
+			record-size = <0x20000>;
+			console-size = <0x20000>;
+		};
+	};
 
 battery: battery {
 		compatible = "simple-battery";
