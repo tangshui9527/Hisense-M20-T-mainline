@@ -120,7 +120,7 @@ jobs:
               --kernel linux/arch/arm/boot/zImage \
               --ramdisk initramfs/initramfs.cpio.gz \
               --dtb $BOARD.qcdt \
-              --cmdline 'console=ttyMSM0,115200,n8 panic=10' \
+              --cmdline 'console=ttyMSM0,115200,n8 panic=10 sdhci.debug_quirks2=0x200' \
               --bootimg m20t-$BOARD.img
           done
           ls -l m20t-*.img

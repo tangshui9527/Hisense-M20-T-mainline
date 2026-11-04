@@ -61,6 +61,8 @@ chroot "$TARGET" /sbin/apk add --no-cache \
     e2fsprogs \
     curl \
     htop \
+    chrony \
+    chrony-openrc \
     ca-certificates
 
 # Clean up QEMU binary from target
@@ -77,12 +79,39 @@ cat <<'EOF' > "$TARGET/etc/hosts"
 ::1         localhost m20t-server
 EOF
 
+# Automatic kernel module loading
+mkdir -p "$TARGET/etc"
+cat <<'EOF' > "$TARGET/etc/modules"
+af_packet
+ipv6
+qcom_wcnss_pil
+wcn36xx
+EOF
+
+# Local startup script for guaranteed Wi-Fi connection
+mkdir -p "$TARGET/etc/local.d"
+cat <<'EOF' > "$TARGET/etc/local.d/wifi.start"
+#!/bin/sh
+ip link set wlan0 address 00:0a:f5:2f:33:9c 2>/dev/null || true
+ip link set wlan0 up 2>/dev/null || true
+if ! pidof wpa_supplicant >/dev/null; then
+    wpa_supplicant -B -i wlan0 -c /etc/wpa_supplicant/wpa_supplicant.conf 2>/dev/null || true
+fi
+if ! ip addr show wlan0 | grep -q "inet 192"; then
+    udhcpc -b -i wlan0 2>/dev/null || true
+fi
+EOF
+chmod +x "$TARGET/etc/local.d/wifi.start"
+
 # Configure OpenRC runlevels
 chroot "$TARGET" /sbin/rc-update add devfs sysinit || true
 chroot "$TARGET" /sbin/rc-update add dmesg sysinit || true
 chroot "$TARGET" /sbin/rc-update add bootmisc boot || true
+chroot "$TARGET" /sbin/rc-update add modules boot || true
 chroot "$TARGET" /sbin/rc-update add hostname boot || true
 chroot "$TARGET" /sbin/rc-update add networking boot || true
+chroot "$TARGET" /sbin/rc-update add local default || true
+chroot "$TARGET" /sbin/rc-update add chronyd default || true
 chroot "$TARGET" /sbin/rc-update add dropbear default || true
 
 # Wi-Fi: wpa_supplicant configuration
