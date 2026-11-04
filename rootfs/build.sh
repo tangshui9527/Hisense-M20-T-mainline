@@ -121,6 +121,15 @@ fi
 EOF
 chmod +x "$TARGET/etc/local.d/screen-off.start"
 
+# Configure chrony NTP to always step time on boot (preventing SSL errors)
+mkdir -p "$TARGET/etc/chrony"
+cat <<'EOF' > "$TARGET/etc/chrony/chrony.conf"
+pool pool.ntp.org iburst
+makestep 1 -1
+driftfile /var/lib/chrony/chrony.drift
+rtcsync
+EOF
+
 # Configure OpenRC runlevels
 chroot "$TARGET" /sbin/rc-update add devfs sysinit || true
 chroot "$TARGET" /sbin/rc-update add dmesg sysinit || true
