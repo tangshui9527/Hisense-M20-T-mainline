@@ -58,6 +58,8 @@ chroot "$TARGET" /sbin/apk add --no-cache \
     wireless-tools \
     iproute2 \
     dhcpcd \
+    uqmi \
+    util-linux-misc \
     e2fsprogs \
     curl \
     htop \
@@ -120,6 +122,58 @@ if which gpioset >/dev/null 2>&1; then
 fi
 EOF
 chmod +x "$TARGET/etc/local.d/screen-off.start"
+
+# zram swap (512M) — 895 MB RAM is tight for a server
+cat <<'EOF' > "$TARGET/etc/local.d/zram.start"
+#!/bin/sh
+modprobe zram 2>/dev/null || true
+[ -b /dev/zram0 ] || exit 0
+[ "$(cat /proc/swaps | grep -c zram)" = "0" ] || exit 0
+echo 512M > /sys/block/zram0/disksize
+mkswap /dev/zram0 >/dev/null 2>&1 && swapon /dev/zram0
+EOF
+chmod +x "$TARGET/etc/local.d/zram.start"
+
+# Hardware watchdog feeder (PM8916 PON WDT, 60 s) — auto-reboot on hang
+cat <<'EOF' > "$TARGET/etc/local.d/watchdog.start"
+#!/bin/sh
+[ -c /dev/watchdog ] || exit 0
+busybox watchdog -t 10 /dev/watchdog &
+EOF
+chmod +x "$TARGET/etc/local.d/watchdog.start"
+
+# Clear the lk2nd boot-attempt counter (state block = last sector of boot);
+# Linux reaching this point means the boot succeeded.
+cat <<'EOF' > "$TARGET/etc/local.d/lk2nd-clear.start"
+#!/bin/sh
+B=/dev/mmcblk0p20
+SZ=$(cat /sys/block/mmcblk0/mmcblk0p20/size 2>/dev/null) || exit 0
+dd if=$B of=/tmp/m20t-state.bin bs=512 skip=$((SZ - 1)) count=1 2>/dev/null || exit 0
+[ "$(xxd -p -l 4 /tmp/m20t-state.bin)" = "5430324d" ] || exit 0
+printf "\000" | dd of=$B bs=1 seek=$(((SZ - 1) * 512 + 4)) conv=notrunc 2>/dev/null
+sync
+EOF
+chmod +x "$TARGET/etc/local.d/lk2nd-clear.start"
+
+# USB CDC-ACM gadget: ttyGS0 console when plugged into a host
+cat <<'EOF' > "$TARGET/etc/local.d/usb-gadget.start"
+#!/bin/sh
+mountpoint -q /sys/kernel/config || mount -t configfs none /sys/kernel/config 2>/dev/null || exit 0
+G=/sys/kernel/config/usb_gadget/m20t
+mkdir -p $G/functions/acm.0 $G/configs/c.1 2>/dev/null || exit 0
+echo 0x05c6 > $G/idVendor 2>/dev/null
+echo 0x9025 > $G/idProduct 2>/dev/null
+ln -sf $G/functions/acm.0 $G/configs/c.1/f1 2>/dev/null || true
+UDC=$(ls /sys/class/udc 2>/dev/null | head -1)
+[ -n "$UDC" ] && echo $UDC > $G/UDC 2>/dev/null || true
+EOF
+chmod +x "$TARGET/etc/local.d/usb-gadget.start"
+
+# eMMC longevity: noatime root + weekly fstrim
+echo "/dev/mmcblk0p29	/	ext4	defaults,noatime	0 1" > "$TARGET/etc/fstab"
+mkdir -p "$TARGET/etc/periodic/weekly"
+printf "#!/bin/sh\n/sbin/fstrim -v /\n" > "$TARGET/etc/periodic/weekly/fstrim"
+chmod +x "$TARGET/etc/periodic/weekly/fstrim"
 
 # Configure chrony NTP to always step time on boot (preventing SSL errors)
 mkdir -p "$TARGET/etc/chrony"
