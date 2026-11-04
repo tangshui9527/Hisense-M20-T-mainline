@@ -203,3 +203,16 @@
 &mpss {
 	status = "okay";
 };
+
+/* BT MAC for btqcomsmd (wcnss-bt): no persistent BD address on this device;
+ * derive a locally-administered one from the WiFi MAC 00:0a:f5:2f:33:9c.
+ * DT property is byte-reversed per the kernel qca/btqcomsmd convention. */
+&wcnss {
+	smd-edge {
+		wcnss {
+			bluetooth {
+				local-bd-address = [9d 33 2f f5 0a 00];
+			};
+		};
+	};
+};
