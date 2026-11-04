@@ -173,17 +173,31 @@ sync
 EOF
 chmod +x "$TARGET/etc/local.d/lk2nd-clear.start"
 
-# USB CDC-ACM gadget: ttyGS0 console when plugged into a host
+# USB composite gadget: serial console (ttyGS0/ACM) + NCM network together
 cat <<'EOF' > "$TARGET/etc/local.d/usb-gadget.start"
 #!/bin/sh
 mountpoint -q /sys/kernel/config || mount -t configfs none /sys/kernel/config 2>/dev/null || exit 0
+# remove the initramfs g1 gadget (ACM only) if it holds the UDC
+G1=/sys/kernel/config/usb_gadget/g1
+if [ -d $G1 ]; then
+    echo "" > $G1/UDC 2>/dev/null
+    rm -f $G1/configs/c.1/f1 2>/dev/null
+    rmdir $G1/configs/c.1/strings/0x409 $G1/configs/c.1/strings $G1/configs/c.1 \
+          $G1/functions/acm.usb0 $G1/strings/0x409 $G1/strings $G1 2>/dev/null
+fi
 G=/sys/kernel/config/usb_gadget/m20t
-mkdir -p $G/functions/acm.0 $G/configs/c.1 2>/dev/null || exit 0
+mkdir -p $G/functions/acm.0 $G/functions/ncm.0 $G/configs/c.1 2>/dev/null || exit 0
 echo 0x05c6 > $G/idVendor 2>/dev/null
 echo 0x9025 > $G/idProduct 2>/dev/null
 ln -sf $G/functions/acm.0 $G/configs/c.1/f1 2>/dev/null || true
-UDC=$(ls /sys/class/udc 2>/dev/null | head -1)
-[ -n "$UDC" ] && echo $UDC > $G/UDC 2>/dev/null || true
+ln -sf $G/functions/ncm.0 $G/configs/c.1/f2 2>/dev/null || true
+n=0
+while [ $n -lt 20 ]; do
+    UDC=$(ls /sys/class/udc 2>/dev/null | head -1)
+    [ -n "$UDC" ] && break
+    sleep 1; n=$((n + 1))
+done
+[ -n "$UDC" ] && echo $UDC > $G/UDC 2>/dev/null
 EOF
 chmod +x "$TARGET/etc/local.d/usb-gadget.start"
 
