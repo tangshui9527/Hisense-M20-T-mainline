@@ -11,8 +11,7 @@
  * platform_version=0x10000, hw_platform=QRD, subtype=0), because the stock
  * aboot (not lk2nd) picks the DTB by matching these ids against SMEM values.
  *
- * Board template: qcom-msm8909-fareastone-smart506.dts (same SoC/PMIC
- * family); WiFi = wcn3620; USB controller is ci-hdrc (from qcom-msm8909.dtsi).
+ * USB controller is ci-hdrc; WiFi = wcn3620; PMIC = PM8909.
  */
 
 /dts-v1/;
@@ -31,6 +30,7 @@
 	qcom,board-id = <0x1000b 0x0>;
 
 	aliases {
+		mmc0 = &sdhc_1;
 		serial0 = &blsp_uart1;
 	};
 
@@ -41,7 +41,8 @@
 	/*
 	 * MSM8909 Hisense M20-T Physical Memory Map:
 	 * Verified directly from live Android 4.4 /proc/iomem and dtb17:
-	 * Bank 0: 0x80000000 - 0x87bfffff (124 MB System RAM)
+	 * Bank 0: 0x80000000 - 0x87afffff (123 MB System RAM)
+	 * Ramoops: 0x87b00000 - 0x87bfffff (1 MB in Lowmem! 100% readable by /dev/mem!)
 	 * Hole:   0x87c00000 - 0x8c5fffff (74 MB: TrustZone, Modem 65MB, Peripheral 5MB)
 	 * Bank 1: 0x8c600000 - 0xbfffffff (826 MB System RAM)
 	 *
@@ -51,13 +52,13 @@
 	 */
 	memory {
 		device_type = "memory";
-		reg = <0x80000000 0x07c00000>,
+		reg = <0x80000000 0x07b00000>,
 		      <0x8c600000 0x33a00000>;
 	};
 
 	memory@80000000 {
 		device_type = "memory";
-		reg = <0x80000000 0x07c00000>,
+		reg = <0x80000000 0x07b00000>,
 		      <0x8c600000 0x33a00000>;
 	};
 
@@ -65,6 +66,15 @@
 		#address-cells = <1>;
 		#size-cells = <1>;
 		ranges;
+
+		/* Ramoops / PStore in Lowmem (1MB at 0x87b00000) */
+		ramoops: ramoops@87b00000 {
+			compatible = "ramoops";
+			reg = <0x87b00000 0x00100000>;
+			record-size = <0x20000>;
+			console-size = <0x40000>;
+			pmsg-size = <0x20000>;
+		};
 
 		/* External image reserve (4MB) */
 		external_image: extimg@87c00000 {
@@ -83,22 +93,9 @@
 			reg = <0x8c100000 0x00500000>;
 			no-map;
 		};
-
-		/* Debug log buffer: earlyprintk (DEBUG_LL, patched to a RAM console) */
-		ramlog@8f000000 {
-			reg = <0x8f000000 0x00100000>;
-		};
-
-		/* Ramoops / PStore at top of RAM (1MB at 0xbff00000) */
-		ramoops: ramoops@bff00000 {
-			compatible = "ramoops";
-			reg = <0xbff00000 0x00100000>;
-			record-size = <0x20000>;
-			console-size = <0x20000>;
-		};
 	};
 
-battery: battery {
+	battery: battery {
 		compatible = "simple-battery";
 		voltage-min-design-microvolt = <3400000>;
 		voltage-max-design-microvolt = <4350000>;
@@ -126,17 +123,32 @@ battery: battery {
 	status = "okay";
 };
 
-&sdhc_1 {
+&pm8909_usbin {
 	status = "okay";
 };
 
+&sdhc_1 {
+	/delete-property/ mmc-hs200-1_8v;
+	/delete-property/ mmc-ddr-1_8v;
+	no-1-8-v;
+	cap-mmc-highspeed;
+	status = "okay";
+};
+
+&sdhc_2 {
+	status = "disabled";
+};
+
 &usb {
-	extcon = <&pm8909_charger>;
+	extcon = <&pm8909_usbin>;
+	dr_mode = "peripheral";
 	status = "okay";
 };
 
 &usb_hs_phy {
-	extcon = <&pm8909_charger>;
+	v1p8-supply = <&pm8909_l7>;
+	v3p3-supply = <&pm8909_l13>;
+	extcon = <&pm8909_usbin>;
 };
 
 &wcnss {
@@ -148,32 +160,7 @@ battery: battery {
 };
 
 &smd_rpm_regulators {
-	s2 {
-		regulator-min-microvolt = <1850000>;
-		regulator-max-microvolt = <1850000>;
-	};
-
-	l1 {
-		regulator-min-microvolt = <1000000>;
-		regulator-max-microvolt = <1000000>;
-	};
-
-	l2 {
-		regulator-min-microvolt = <1200000>;
-		regulator-max-microvolt = <1200000>;
-	};
-
-	l4 {
-		regulator-min-microvolt = <1800000>;
-		regulator-max-microvolt = <1800000>;
-	};
-
 	l5 {
-		regulator-min-microvolt = <1800000>;
-		regulator-max-microvolt = <1800000>;
-	};
-
-	l6 {
 		regulator-min-microvolt = <1800000>;
 		regulator-max-microvolt = <1800000>;
 	};
@@ -188,50 +175,8 @@ battery: battery {
 		regulator-max-microvolt = <2900000>;
 	};
 
-	l9 {
-		regulator-min-microvolt = <3000000>;
-		regulator-max-microvolt = <3300000>;
-	};
-
-	l10 {
-		regulator-min-microvolt = <1225000>;
-		regulator-max-microvolt = <1300000>;
-	};
-
-	l11 {
-		regulator-min-microvolt = <1800000>;
-		regulator-max-microvolt = <2950000>;
-		regulator-allow-set-load;
-		regulator-system-load = <200000>;
-	};
-
-	l12 {
-		regulator-min-microvolt = <1800000>;
-		regulator-max-microvolt = <2950000>;
-	};
-
 	l13 {
 		regulator-min-microvolt = <3075000>;
 		regulator-max-microvolt = <3075000>;
-	};
-
-	l14 {
-		regulator-min-microvolt = <1800000>;
-		regulator-max-microvolt = <3000000>;
-	};
-
-	l15 {
-		regulator-min-microvolt = <1800000>;
-		regulator-max-microvolt = <3000000>;
-	};
-
-	l17 {
-		regulator-min-microvolt = <2850000>;
-		regulator-max-microvolt = <2850000>;
-	};
-
-	l18 {
-		regulator-min-microvolt = <2700000>;
-		regulator-max-microvolt = <2700000>;
 	};
 };
