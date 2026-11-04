@@ -1,46 +1,40 @@
-#!/bin/busybox sh
+#!/busybox sh
 # initramfs /init for m20-t-mainline -- RAM-root rescue/control stage.
-# Exposes dual control channels over USB:
-# 1) CDC-ACM USB Serial Console (/dev/ttyGS0 -> macOS /dev/cu.usbmodem*)
-# 2) CDC-NCM USB Ethernet (172.16.42.1 with telnetd on port 23)
+# Exposes CDC-ACM USB Serial Console (/dev/ttyGS0 -> macOS /dev/cu.usbmodem*)
 
-export PATH=/bin:/sbin
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
 
+# Install busybox applets into /bin and /sbin
 /busybox --install -s /bin 2>/dev/null
+/busybox --install -s /sbin 2>/dev/null
 
-# --- basic mounts -----------------------------------------------------------
-mkdir -p /proc /sys /dev /tmp /config /dev/pts /run
-busybox mount -t proc     none     /proc
-busybox mount -t sysfs    none     /sys
-busybox mount -t devtmpfs none     /dev 2>/dev/null || busybox mdev -s
-busybox mount -t devpts   none     /dev/pts
-busybox mount -t tmpfs    none     /tmp
-busybox mount -t configfs none     /config
+# Basic virtual filesystems
+mkdir -p /proc /sys /dev /tmp /config /dev/pts /run /bin /sbin
+busybox mount -t proc     none /proc     2>/dev/null || true
+busybox mount -t sysfs    none /sys      2>/dev/null || true
+busybox mount -t devtmpfs none /dev      2>/dev/null || true
+busybox mount -t devpts   none /dev/pts  2>/dev/null || true
+busybox mount -t tmpfs    none /tmp      2>/dev/null || true
+busybox mount -t configfs none /config   2>/dev/null || true
+busybox mdev -s 2>/dev/null || true
 
 LOG=/tmp/boot.log
 klog() {
     echo "<1>M20T: $*" > /dev/kmsg 2>/dev/null
-    echo "$*" >> $LOG
+    echo "$*" >> "$LOG"
 }
-{
-    echo "== m20-t-mainline initramfs =="
-    date -u
-    echo "kernel: $(uname -a)"
-} > $LOG
+
 klog "initramfs started on $(uname -a)"
 
-# --- clear lk2nd boot-failure marker ----------------------------------------
+# --- Clear lk2nd boot-failure marker on eMMC boot partition ---
 clear_lk2nd_attempts() {
     for uevent in /sys/class/block/mmcblk0p*/uevent; do
         [ -e "$uevent" ] || continue
         grep -q '^PARTNAME=boot$' "$uevent" || continue
         blk="/dev/$(basename "$(dirname "$uevent")")"
         [ -b "$blk" ] || continue
-        if busybox dd if=/dev/zero of="$blk" bs=1 seek=32505860 count=1 \
-                conv=notrunc 2>/dev/null; then
-            echo "lk2nd: boot attempt counter cleared on $blk" >> $LOG
-        else
-            echo "lk2nd: could not clear boot attempt counter on $blk" >> $LOG
+        if busybox dd if=/dev/zero of="$blk" bs=1 seek=32505860 count=1 conv=notrunc 2>/dev/null; then
+            klog "lk2nd boot attempt counter cleared on $blk"
         fi
         return 0
     done
@@ -48,100 +42,61 @@ clear_lk2nd_attempts() {
 }
 clear_lk2nd_attempts
 
-# --- USB Gadget Bringup (ACM Serial + NCM Network) --------------------------
-setup_usb_gadget() {
-    klog "[usb] Setting up configfs gadget..."
-    mkdir -p /config/usb_gadget/g1 || return 1
-    cd /config/usb_gadget/g1
+# --- USB Gadget Handler ---
+# Check if g_serial (built-in) is active
+UDC=$(ls /sys/class/udc 2>/dev/null | busybox head -n 1)
+klog "Detected UDC: ${UDC:-none}"
 
-    echo 0x18d1 > idVendor      # Google VID (universally supported by macOS CDC drivers)
-    echo 0x4ee7 > idProduct     # ACM + NCM product id
-    mkdir -p strings/0x409
-    echo "Hisense"       > strings/0x409/manufacturer
-    echo "M20-T Mainline" > strings/0x409/product
-    echo "2f339cef"       > strings/0x409/serialnumber
+if [ -f /sys/class/tty/ttyGS0/dev ] || [ -c /dev/ttyGS0 ]; then
+    klog "Native g_serial detected on /dev/ttyGS0"
+else
+    # Try configfs fallback if g_serial didn't bind
+    klog "Attempting configfs gadget setup..."
+    mkdir -p /config/usb_gadget/g1 2>/dev/null
+    if [ -d /config/usb_gadget/g1 ]; then
+        cd /config/usb_gadget/g1
+        echo 0x18d1 > idVendor 2>/dev/null
+        echo 0x4ee7 > idProduct 2>/dev/null
+        mkdir -p strings/0x409 2>/dev/null
+        echo "Hisense" > strings/0x409/manufacturer 2>/dev/null
+        echo "M20-T Mainline" > strings/0x409/product 2>/dev/null
+        echo "2f339cef" > strings/0x409/serialnumber 2>/dev/null
+        mkdir -p functions/acm.usb0 2>/dev/null
+        mkdir -p configs/c.1/strings/0x409 2>/dev/null
+        ln -sf functions/acm.usb0 configs/c.1/acm 2>/dev/null
+        if [ -n "$UDC" ]; then
+            echo "$UDC" > UDC 2>/dev/null && klog "Configfs bound to $UDC"
+        fi
+    fi
+fi
 
-    # Functions: CDC-ACM (Serial) + CDC-NCM (Ethernet)
-    mkdir -p functions/acm.usb0
-    mkdir -p functions/ncm.usb0
+# Ensure device node /dev/ttyGS0 exists
+if [ ! -c /dev/ttyGS0 ] && [ -f /sys/class/tty/ttyGS0/dev ]; then
+    IFS=: read -r maj min < /sys/class/tty/ttyGS0/dev
+    busybox mknod /dev/ttyGS0 c "$maj" "$min" 2>/dev/null
+fi
 
-    # Config 1
-    mkdir -p configs/c.1
-    echo 500 > configs/c.1/MaxPower
-    mkdir -p configs/c.1/strings/0x409
-    echo "ACM + NCM" > configs/c.1/strings/0x409/configuration
-
-    ln -sf functions/acm.usb0 configs/c.1/acm
-    ln -sf functions/ncm.usb0 configs/c.1/ncm
-
-    # Wait up to 10 seconds for UDC to probe
-    klog "[usb] Waiting for UDC controller..."
-    UDC=""
-    for i in $(busybox seq 1 10); do
-        UDC=$(ls /sys/class/udc 2>/dev/null | busybox head -n 1)
-        [ -n "$UDC" ] && break
+# Background task: Monitor /dev/ttyGS0 and spawn root shell
+(
+    while true; do
+        if [ ! -c /dev/ttyGS0 ] && [ -f /sys/class/tty/ttyGS0/dev ]; then
+            IFS=: read -r maj min < /sys/class/tty/ttyGS0/dev
+            busybox mknod /dev/ttyGS0 c "$maj" "$min" 2>/dev/null
+        fi
+        if [ -c /dev/ttyGS0 ]; then
+            klog "Spawning interactive root shell on /dev/ttyGS0..."
+            /busybox setsid /bin/sh </dev/ttyGS0 >/dev/ttyGS0 2>&1
+        fi
         sleep 1
     done
-
-    if [ -z "$UDC" ]; then
-        klog "[usb] ERROR: No UDC appeared after 10s!"
-        klog "[usb] Diagnostics:"
-        klog "[usb] /sys/class/udc: $(ls /sys/class/udc 2>/dev/null)"
-        klog "[usb] platform devices: $(ls -d /sys/bus/platform/devices/*usb* 2>/dev/null)"
-        busybox dmesg | busybox grep -i -E "usb|phy|ci_hdrc|udc|pm8909|regulator" | while read -r line; do
-            klog "[kmsg] $line"
-        done
-        return 1
-    fi
-
-    klog "[usb] Found UDC: $UDC, binding gadget..."
-    echo "$UDC" > UDC || { klog "[usb] ERROR: UDC bind failed"; return 1; }
-    klog "[usb] Gadget successfully bound to $UDC"
-
-    # Configure NCM network interface
-    sleep 1
-    if busybox ifconfig usb0 172.16.42.1 netmask 255.255.255.0 up 2>>$LOG; then
-        klog "[usb] NCM network UP: 172.16.42.1"
-    else
-        klog "[usb] WARNING: ifconfig usb0 failed"
-    fi
-
-    return 0
-}
-
-# Run gadget setup in background if UDC is slow, or immediately
-setup_usb_gadget
-
-# Persistent background watcher: bind UDC whenever it appears
-(
-    while true; do
-        if [ -d /config/usb_gadget/g1 ] && [ -z "$(cat /config/usb_gadget/g1/UDC 2>/dev/null)" ]; do
-            UDC=$(ls /sys/class/udc 2>/dev/null | busybox head -n 1)
-            if [ -n "$UDC" ]; then
-                echo "$UDC" > /config/usb_gadget/g1/UDC 2>/dev/null && \
-                    busybox ifconfig usb0 172.16.42.1 netmask 255.255.255.0 up 2>/dev/null
-            fi
-        fi
-        sleep 2
-    done
 ) &
 
-# Start USB Serial Console on /dev/ttyGS0 (Mac opens /dev/cu.usbmodem*)
-(
-    while true; do
-        if [ -c /dev/ttyGS0 ]; then
-            echo "Starting root shell on /dev/ttyGS0..." >> $LOG
-            busybox setsid /bin/sh </dev/ttyGS0 >/dev/ttyGS0 2>&1
-        fi
-        sleep 2
-    done
-) &
+# Telnet daemon on port 23 if network is ever configured
+busybox telnetd -l /bin/sh 2>/dev/null || true
 
-# Start Telnet server
-busybox telnetd -l /bin/sh -b 0.0.0.0:23
+klog "initramfs initialization complete. PID 1 entering sleep loop."
 
-# --- keep main console alive ------------------------------------------------
-echo "m20-t-mainline initramfs ready (ttyGS0 serial + telnetd 172.16.42.1:23)"
+# PID 1 must never exit!
 while true; do
-    busybox setsid cttyhack /bin/sh 2>/dev/null || /bin/sh -i 2>/dev/null || sleep 2
+    sleep 3600
 done

@@ -129,11 +129,13 @@
 
 &usb {
 	dr_mode = "peripheral";
+	extcon = <&pm8909_usbin>;
 	status = "okay";
 };
 
 &usb_hs_phy {
-	qcom,init-seq = [80 73];
+	extcon = <&pm8909_usbin>;
+	qcom,init-seq = [16 03 17 03];
 	v1p8-supply = <&pm8909_l7>;
 	v3p3-supply = <&pm8909_l13>;
 };
