@@ -46,18 +46,6 @@ jobs:
           git checkout --detach "$KERNEL_COMMIT"
           git log -1 --format="kernel %H %cs %s" | tee ../kernel-info.txt
 
-      - name: Apply RAM console patch
-        run: |
-          cd linux
-          git apply ../kernel-romconsole.patch
-          grep -c "M20-T RAM console" arch/arm/include/debug/msm.S
-
-      - name: Apply early markers patch
-        run: |
-          cd linux
-          git apply ../kernel-early-markers.patch
-          grep -c "0x8f000000" arch/arm/boot/compressed/misc.c
-
       - name: Apply board DTS
         run: |
           cd linux
@@ -70,25 +58,17 @@ jobs:
         run: |
           cp configs/msm8909-reference.config linux/.config
           cd linux
-          # the M20-T initramfs brings up USB NCM from the RAM root: force builtin
+          # The M20-T initramfs brings up USB NCM from the RAM root: force builtin
           scripts/config --enable USB_CONFIGFS --enable USB_F_NCM \
                          --enable USB_CHIPIDEA_UDC
-          # DEBUG_LL RAM console (early-hang post-mortem, see kernel-romconsole.patch):
-          # the "debug UART" IS a RAM buffer at phys 0x8f001000 (lk2nd oem debug
-          # readl can read it back after a hang). DEBUG_LL depends on DEBUG_KERNEL.
-          scripts/config --enable DEBUG_KERNEL \
-                         --enable DEBUG_LL --enable DEBUG_QCOM_UARTDM \
-                         --enable EARLY_PRINTK \
-                         --set-str DEBUG_LL_INCLUDE "debug/msm.S" \
-                         --set-val DEBUG_UART_PHYS 0x8f001000 \
-                         --set-val DEBUG_UART_VIRT 0xcf001000
+          # Clean native standard PSTORE/RAMOOPS for panic/crashlog retention
+          scripts/config --enable PSTORE --enable PSTORE_CONSOLE \
+                         --enable PSTORE_RAM --disable DEBUG_LL
           make ARCH=arm CROSS_COMPILE="$CROSS" olddefconfig
           scripts/config --enable USB_CONFIGFS --enable USB_F_NCM \
                          --enable USB_CHIPIDEA_UDC \
-                         --enable DEBUG_KERNEL \
-                         --enable DEBUG_LL --enable DEBUG_QCOM_UARTDM \
-                         --enable EARLY_PRINTK \
-                         --set-str DEBUG_LL_INCLUDE "debug/msm.S"
+                         --enable PSTORE --enable PSTORE_CONSOLE \
+                         --enable PSTORE_RAM --disable DEBUG_LL
           make ARCH=arm CROSS_COMPILE="$CROSS" olddefconfig
           f() { grep -E "^$1" .config || echo "MISSING $1"; }
           f CONFIG_USB_CONFIGFS=
@@ -99,12 +79,7 @@ jobs:
           f CONFIG_MMC_BLOCK=
           f CONFIG_PINCTRL_MSM8909=
           f CONFIG_QCOM_SMD_RPM=
-          f CONFIG_DEBUG_KERNEL=
-          f CONFIG_DEBUG_LL=
-          f CONFIG_DEBUG_QCOM_UARTDM=
-          f CONFIG_DEBUG_UART_PHYS=
-          grep -q 'CONFIG_DEBUG_UART_PHYS=0x8f001000' .config \
-            || { echo 'FATAL: DEBUG_UART_PHYS not 0x8f001000'; grep DEBUG_UART .config; exit 1; }
+          f CONFIG_PSTORE_RAM=
 
       - name: Build kernel + dtb
         run: |
@@ -137,7 +112,7 @@ jobs:
               --kernel linux/arch/arm/boot/zImage \
               --ramdisk initramfs/initramfs.cpio.gz \
               --dtb $BOARD.qcdt \
-              --cmdline 'console=ttyHSL0,115200,n8 earlyprintk' \
+              --cmdline 'console=ttyMSM0,115200,n8 panic=10' \
               --bootimg m20t-$BOARD.img
           done
           ls -l m20t-*.img
