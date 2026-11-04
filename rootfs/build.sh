@@ -65,6 +65,9 @@ chroot "$TARGET" /sbin/apk add --no-cache \
     chrony \
     chrony-openrc \
     libgpiod \
+    bluez \
+    bluez-openrc \
+    bluez-deprecated \
     ca-certificates
 
 # Clean up QEMU binary from target
@@ -88,6 +91,7 @@ af_packet
 ipv6
 qcom_wcnss_pil
 wcn36xx
+btqcomsmd
 EOF
 
 # Local startup script for guaranteed Wi-Fi connection
@@ -121,6 +125,16 @@ if which gpioset >/dev/null 2>&1; then
 fi
 EOF
 chmod +x "$TARGET/etc/local.d/screen-off.start"
+
+# Local startup script to bring up Bluetooth adapter
+cat <<'EOF' > "$TARGET/etc/local.d/bluetooth.start"
+#!/bin/sh
+if ! hciconfig hci0 2>/dev/null | grep -q 'UP RUNNING'; then
+    hciconfig hci0 reset 2>/dev/null || true
+    hciconfig hci0 up 2>/dev/null || true
+fi
+EOF
+chmod +x "$TARGET/etc/local.d/bluetooth.start"
 
 # zram swap (512M) — 895 MB RAM is tight for a server
 cat <<'EOF' > "$TARGET/etc/local.d/zram.start"

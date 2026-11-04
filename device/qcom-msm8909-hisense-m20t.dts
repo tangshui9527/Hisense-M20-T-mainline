@@ -153,6 +153,11 @@
 	status = "okay";
 };
 
+&wcnss_bt {
+	local-bd-address = [ 00 0a f5 2f 33 9d ];
+	status = "okay";
+};
+
 &smd_rpm_regulators {
 	l2 {
 		regulator-min-microvolt = <1200000>;
