@@ -59,6 +59,7 @@ chroot "$TARGET" /sbin/apk add --no-cache \
     iproute2 \
     dhcpcd \
     util-linux-misc \
+    qrtr \
     e2fsprogs \
     curl \
     htop \
@@ -215,14 +216,26 @@ done
 EOF
 chmod +x "$TARGET/etc/local.d/usb-gadget.start"
 
-# Cellular modem autostart: firmware lives on the modem partition (vfat);
-# mss PIL (qcom_q6v5_mss) loads mba.mbn + modem.mdt/bXX from /lib/firmware.
+# Cellular modem autostart (verified live on device):
+#   qrtr-ns -> rmtfs -P (serves modemst1/2+fsg+fsc EFS via qrtr; WITHOUT it
+#   the modem watchdog-crashes in a loop) -> mss remoteproc start.
+# Alpine has no /dev/disk/by-partlabel (mdev) — symlinks are hardcoded to
+# this device's GPT mapping (modemst1=p11 modemst2=p12 fsg=p18 fsc=p14).
+# Firmware (mba.mbn, modem.*) is copied from the vfat modem partition (p1).
 cat <<'EOF' > "$TARGET/etc/local.d/modem.start"
 #!/bin/sh
+[ -c /dev/mmcblk0p11 ] || exit 0
+pgrep qrtr-ns >/dev/null || qrtr-ns &
+mkdir -p /dev/disk/by-partlabel
+ln -sf /dev/mmcblk0p11 /dev/disk/by-partlabel/modemst1
+ln -sf /dev/mmcblk0p12 /dev/disk/by-partlabel/modemst2
+ln -sf /dev/mmcblk0p18 /dev/disk/by-partlabel/fsg
+ln -sf /dev/mmcblk0p14 /dev/disk/by-partlabel/fsc
+pgrep rmtfs >/dev/null || (rmtfs -P -v > /tmp/rmtfs.log 2>&1 &)
+sleep 1
 [ -d /sys/class/remoteproc/remoteproc1 ] || { modprobe qcom_q6v5_mss 2>/dev/null; sleep 1; }
 R=/sys/class/remoteproc/remoteproc1
 [ -d $R ] || exit 0
-[ "$(cat $R/state)" = "running" ] && exit 0
 FW=/lib/firmware
 if [ ! -f $FW/modem.mdt ] || [ ! -f $FW/modem.b22 ]; then
     mkdir -p /mnt/modem
@@ -230,7 +243,7 @@ if [ ! -f $FW/modem.mdt ] || [ ! -f $FW/modem.b22 ]; then
         cp /mnt/modem/image/mba.mbn /mnt/modem/image/modem.* $FW/ 2>/dev/null
     umount /mnt/modem 2>/dev/null
 fi
-echo start > $R/state 2>/dev/null
+[ "$(cat $R/state)" = "running" ] || echo start > $R/state 2>/dev/null
 EOF
 chmod +x "$TARGET/etc/local.d/modem.start"
 
