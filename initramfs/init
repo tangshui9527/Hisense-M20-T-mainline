@@ -101,6 +101,20 @@ setup_usb_gadget() {
 # Run gadget setup in background if UDC is slow, or immediately
 setup_usb_gadget
 
+# Persistent background watcher: bind UDC whenever it appears
+(
+    while true; do
+        if [ -d /config/usb_gadget/g1 ] && [ -z "$(cat /config/usb_gadget/g1/UDC 2>/dev/null)" ]; do
+            UDC=$(ls /sys/class/udc 2>/dev/null | busybox head -n 1)
+            if [ -n "$UDC" ]; then
+                echo "$UDC" > /config/usb_gadget/g1/UDC 2>/dev/null && \
+                    busybox ifconfig usb0 172.16.42.1 netmask 255.255.255.0 up 2>/dev/null
+            fi
+        fi
+        sleep 2
+    done
+) &
+
 # Start USB Serial Console on /dev/ttyGS0 (Mac opens /dev/cu.usbmodem*)
 (
     while true; do

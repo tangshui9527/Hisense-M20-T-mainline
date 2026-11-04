@@ -128,11 +128,13 @@
 };
 
 &usb {
+	extcon = <&pm8909_usbin>;
 	dr_mode = "peripheral";
 	status = "okay";
 };
 
 &usb_hs_phy {
+	extcon = <&pm8909_usbin>;
 	v1p8-supply = <&pm8909_l7>;
 	v3p3-supply = <&pm8909_l13>;
 };
@@ -142,6 +144,13 @@
 };
 
 &smd_rpm_regulators {
+	l2 {
+		regulator-min-microvolt = <1200000>;
+		regulator-max-microvolt = <1200000>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+
 	l5 {
 		regulator-min-microvolt = <1800000>;
 		regulator-max-microvolt = <1800000>;
@@ -150,6 +159,8 @@
 	l7 {
 		regulator-min-microvolt = <1800000>;
 		regulator-max-microvolt = <1800000>;
+		regulator-always-on;
+		regulator-boot-on;
 	};
 
 	l8 {
@@ -160,5 +171,7 @@
 	l13 {
 		regulator-min-microvolt = <3075000>;
 		regulator-max-microvolt = <3075000>;
+		regulator-always-on;
+		regulator-boot-on;
 	};
 };
