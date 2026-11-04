@@ -1,14 +1,8 @@
 #!/bin/busybox sh
 # initramfs /init for m20-t-mainline -- RAM-root rescue/control stage.
-#
-# Goal (phase 1): prove the mainline kernel boots on the Hisense M20-T and
-# expose a shell over USB (NCM gadget, telnet on 172.16.42.1:23).
-#
-# USB host side:  interface NCM, host addr 172.16.42.2/24, then
-#   telnet 172.16.42.1
-#
-# All USB gadget pieces (mainline kernel) are built-in: ci-hdrc UDC,
-# configfs (CONFIG_USB_CONFIGFS=y) and USB_F_NCM=y.
+# Exposes dual control channels over USB:
+# 1) CDC-ACM USB Serial Console (/dev/ttyGS0 -> macOS /dev/cu.usbmodem*)
+# 2) CDC-NCM USB Ethernet (172.16.42.1 with telnetd on port 23)
 
 export PATH=/bin:/sbin
 
@@ -23,21 +17,14 @@ busybox mount -t devpts   none     /dev/pts
 busybox mount -t tmpfs    none     /tmp
 busybox mount -t configfs none     /config
 
-# --- USB NCM gadget ---------------------------------------------------------
+LOG=/tmp/boot.log
 {
     echo "== m20-t-mainline initramfs =="
     date -u
     echo "kernel: $(uname -a)"
-    echo "udc candidates: $(ls /sys/class/udc/ 2>&1)"
-} > /tmp/boot.log
-
-LOG=/tmp/boot.log
+} > $LOG
 
 # --- clear lk2nd boot-failure marker ----------------------------------------
-# lk2nd counts Linux boot attempts in the boot partition (offset 31 MiB + 4,
-# see docs/lk2nd-m20t-design.md). Reaching this init at all means the kernel
-# booted, so the counter must go back to zero -- otherwise a working image
-# would eventually be treated as failing and land in fastboot.
 clear_lk2nd_attempts() {
     for uevent in /sys/class/block/mmcblk0p*/uevent; do
         [ -e "$uevent" ] || continue
@@ -52,51 +39,84 @@ clear_lk2nd_attempts() {
         fi
         return 0
     done
-    echo "lk2nd: boot partition not found, attempt counter untouched" >> $LOG
     return 0
 }
 clear_lk2nd_attempts
 
-setup_ncm() {
-    mkdir -p /config/usb_gadget/g1 || { echo "configfs mkdir failed" >> $LOG; return 1; }
+# --- USB Gadget Bringup (ACM Serial + NCM Network) --------------------------
+setup_usb_gadget() {
+    echo "[usb] Setting up configfs gadget..." >> $LOG
+    mkdir -p /config/usb_gadget/g1 || return 1
     cd /config/usb_gadget/g1
-    echo 0x1381 > idVendor      # Hisense VID (placeholder, purely cosmetic)
-    echo 0x0020 > idProduct
+
+    echo 0x18d1 > idVendor      # Google VID (universally supported by macOS CDC drivers)
+    echo 0x4ee7 > idProduct     # ACM + NCM product id
     mkdir -p strings/0x409
-    echo m20t-mainline    > strings/0x409/manufacturer
-    echo m20t-initramfs   > strings/0x409/product
+    echo "Hisense"       > strings/0x409/manufacturer
+    echo "M20-T Mainline" > strings/0x409/product
+    echo "2f339cef"       > strings/0x409/serialnumber
+
+    # Functions: CDC-ACM (Serial) + CDC-NCM (Ethernet)
+    mkdir -p functions/acm.usb0
     mkdir -p functions/ncm.usb0
+
+    # Config 1
     mkdir -p configs/c.1
-    echo 250 > configs/c.1/MaxPower
+    echo 500 > configs/c.1/MaxPower
+    mkdir -p configs/c.1/strings/0x409
+    echo "ACM + NCM" > configs/c.1/strings/0x409/configuration
+
+    ln -sf functions/acm.usb0 configs/c.1/acm
     ln -sf functions/ncm.usb0 configs/c.1/ncm
-    UDC=$(ls /sys/class/udc | head -n 1)
-    [ -n "$UDC" ] || { echo "no UDC present" >> $LOG; return 1; }
-    echo "$UDC" > UDC || { echo "UDC bind failed" >> $LOG; return 1; }
+
+    # Wait up to 20 seconds for UDC to probe
+    echo "[usb] Waiting for UDC controller..." >> $LOG
+    UDC=""
+    for i in $(busybox seq 1 20); do
+        UDC=$(ls /sys/class/udc 2>/dev/null | busybox head -n 1)
+        [ -n "$UDC" ] && break
+        sleep 1
+    done
+
+    if [ -z "$UDC" ]; then
+        echo "[usb] ERROR: No UDC appeared after 20s" >> $LOG
+        return 1
+    fi
+
+    echo "[usb] Found UDC: $UDC, binding gadget..." >> $LOG
+    echo "$UDC" > UDC || { echo "[usb] ERROR: UDC bind failed" >> $LOG; return 1; }
+    echo "[usb] Gadget successfully bound to $UDC" >> $LOG
+
+    # Configure NCM network interface
     sleep 1
-    busybox ifconfig usb0 172.16.42.1 netmask 255.255.255.0 up 2>>$LOG \
-        || { echo "ifconfig usb0 failed" >> $LOG; return 1; }
+    if busybox ifconfig usb0 172.16.42.1 netmask 255.255.255.0 up 2>>$LOG; then
+        echo "[usb] NCM network UP: 172.16.42.1" >> $LOG
+    else
+        echo "[usb] WARNING: ifconfig usb0 failed" >> $LOG
+    fi
+
     return 0
 }
 
-if setup_ncm; then
-    echo "USB NCM gadget UP: 172.16.42.1" >> $LOG
-else
-    echo "USB NCM gadget setup failed, log:" >> $LOG
-    echo "---- dmesg tail ----" >> $LOG
-    busybox dmesg | busybox tail -40 >> $LOG 2>/dev/null
-fi
+# Run gadget setup in background if UDC is slow, or immediately
+setup_usb_gadget
 
-# telnetd regardless of interface state (rebind later is still possible
-# from the shell with /etc/setup-ncm.sh)
+# Start USB Serial Console on /dev/ttyGS0 (Mac opens /dev/cu.usbmodem*)
+(
+    while true; do
+        if [ -c /dev/ttyGS0 ]; then
+            echo "Starting root shell on /dev/ttyGS0..." >> $LOG
+            busybox setsid /bin/sh </dev/ttyGS0 >/dev/ttyGS0 2>&1
+        fi
+        sleep 2
+    done
+) &
+
+# Start Telnet server
 busybox telnetd -l /bin/sh -b 0.0.0.0:23
 
-# --- keep console alive -----------------------------------------------------
-echo
-echo "m20-t-mainline initramfs shell (console + telnetd 0.0.0.0:23)"
-if [ -e /proc/cmdline ]; then
-    grep -q m20tlin=1 /proc/cmdline && echo "(stock-marker cmdline detected -- stock kernel space)"
-fi
-
+# --- keep main console alive ------------------------------------------------
+echo "m20-t-mainline initramfs ready (ttyGS0 serial + telnetd 172.16.42.1:23)"
 while true; do
-    setsid cttyhack /bin/sh 2>/dev/null || /bin/sh -i 2>/dev/null || sleep 2
+    busybox setsid cttyhack /bin/sh 2>/dev/null || /bin/sh -i 2>/dev/null || sleep 2
 done

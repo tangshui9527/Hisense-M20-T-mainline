@@ -128,7 +128,6 @@
 };
 
 &usb {
-	extcon = <&pm8909_usbin>;
 	dr_mode = "peripheral";
 	status = "okay";
 };
@@ -136,7 +135,6 @@
 &usb_hs_phy {
 	v1p8-supply = <&pm8909_l7>;
 	v3p3-supply = <&pm8909_l13>;
-	extcon = <&pm8909_usbin>;
 };
 
 &wcnss {
