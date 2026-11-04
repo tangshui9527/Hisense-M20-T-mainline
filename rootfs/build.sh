@@ -58,7 +58,6 @@ chroot "$TARGET" /sbin/apk add --no-cache \
     wireless-tools \
     iproute2 \
     dhcpcd \
-    uqmi \
     util-linux-misc \
     e2fsprogs \
     curl \
