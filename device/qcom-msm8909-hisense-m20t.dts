@@ -197,3 +197,9 @@
 		regulator-boot-on;
 	};
 };
+
+/* Cellular modem subsystem (qcom_q6v5_mss): firmware in /lib/firmware
+ * (mba.mbn, modem.mdt + modem.bXX from the modem partition). */
+&mpss {
+	status = "okay";
+};
