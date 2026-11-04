@@ -78,15 +78,12 @@ cat <<'EOF' > "$TARGET/etc/hosts"
 EOF
 
 # Configure OpenRC runlevels
-chroot "$TARGET" /sbin/rc-update add devfs sysinit
-chroot "$TARGET" /sbin/rc-update add dmesg sysinit
-chroot "$TARGET" /sbin/rc-update add mdev sysinit
-chroot "$TARGET" /sbin/rc-update add hwdrivers sysinit
-
-chroot "$TARGET" /sbin/rc-update add bootmisc boot
-chroot "$TARGET" /sbin/rc-update add hostname boot
-chroot "$TARGET" /sbin/rc-update add networking boot
-chroot "$TARGET" /sbin/rc-update add dropbear default
+chroot "$TARGET" /sbin/rc-update add devfs sysinit || true
+chroot "$TARGET" /sbin/rc-update add dmesg sysinit || true
+chroot "$TARGET" /sbin/rc-update add bootmisc boot || true
+chroot "$TARGET" /sbin/rc-update add hostname boot || true
+chroot "$TARGET" /sbin/rc-update add networking boot || true
+chroot "$TARGET" /sbin/rc-update add dropbear default || true
 
 # Wi-Fi: wpa_supplicant configuration
 mkdir -p "$TARGET/etc/wpa_supplicant"
