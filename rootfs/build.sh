@@ -51,7 +51,6 @@ echo "[rootfs] Installing packages via chroot..."
 chroot "$TARGET" /sbin/apk update
 chroot "$TARGET" /sbin/apk add --no-cache \
     openrc \
-    busybox-initscripts \
     dropbear \
     dropbear-openrc \
     wpa_supplicant \
