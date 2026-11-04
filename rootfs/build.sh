@@ -19,11 +19,20 @@ TARGET="$WORK/rootfs"
 mkdir -p "$TARGET"
 tar -xzf "$WORK/minirootfs.tar.gz" -C "$TARGET"
 
-# Set up QEMU user-static for armhf chroot emulation
-if [ -f /usr/bin/qemu-arm-static ]; then
-    cp /usr/bin/qemu-arm-static "$TARGET/usr/bin/"
-elif [ -f /usr/bin/qemu-arm ]; then
-    cp /usr/bin/qemu-arm "$TARGET/usr/bin/qemu-arm-static"
+# Locate and configure QEMU user-static for armhf chroot emulation
+QEMU_BIN=""
+for candidate in /usr/bin/qemu-arm-static /usr/bin/qemu-arm /usr/libexec/qemu-binfmt/arm-binfmt-P; do
+    if [ -f "$candidate" ]; then
+        QEMU_BIN="$candidate"
+        break
+    fi
+done
+
+if [ -n "$QEMU_BIN" ]; then
+    echo "[rootfs] Using QEMU binary: $QEMU_BIN"
+    mkdir -p "$TARGET/usr/bin"
+    cp "$QEMU_BIN" "$TARGET/usr/bin/qemu-arm-static"
+    chmod +x "$TARGET/usr/bin/qemu-arm-static"
 fi
 
 # DNS configuration for chroot

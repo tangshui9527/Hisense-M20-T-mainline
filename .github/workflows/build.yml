@@ -26,8 +26,13 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y -q \
             gcc-arm-linux-gnueabihf bison flex bc cpio libssl-dev \
-            python3 ccache curl tar qemu-user-static binfmt-support
+            python3 ccache curl tar
           echo "/usr/lib/ccache" >> "$GITHUB_PATH"
+
+      - name: Set up QEMU for armhf
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm
 
       - uses: actions/checkout@v4
 
