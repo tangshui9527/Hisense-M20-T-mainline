@@ -94,6 +94,20 @@ wcn36xx
 btqcomsmd
 EOF
 
+# qrtr-ns: static cross-build (kernel QRTR_SMD is built-in; the nameserver
+# is required so the modem can discover the host rmtfs service)
+if [ ! -f "$TARGET/usr/sbin/qrtr-ns" ]; then
+    echo "[rootfs] cross-building qrtr-ns..."
+    git clone -q https://github.com/linux-msm/qrtr /tmp/qrtr-src
+    git -C /tmp/qrtr-src checkout -q 9dc7a88548c2
+    mkdir -p "$TARGET/usr/sbin"
+    ${CROSS}gcc -static -I/tmp/qrtr-src/lib -o "$TARGET/usr/sbin/qrtr-ns" \
+        /tmp/qrtr-src/src/ns.c /tmp/qrtr-src/lib/qrtr.c /tmp/qrtr-src/src/addr.c \
+        /tmp/qrtr-src/src/hash.c /tmp/qrtr-src/src/map.c 2>/dev/null \
+    || ${CROSS}gcc -static -I/tmp/qrtr-src -I/tmp/qrtr-src/lib \
+        -o "$TARGET/usr/sbin/qrtr-ns" /tmp/qrtr-src/src/*.c /tmp/qrtr-src/lib/*.c
+fi
+
 # bluetoothd must start AFTER dbus (parallel start races -> daemon exits ->
 # OpenRC marks it crashed and it never comes back)
 mkdir -p "$TARGET/etc/conf.d"
