@@ -133,6 +133,7 @@
 };
 
 &usb_hs_phy {
+	qcom,init-seq = [80 73];
 	v1p8-supply = <&pm8909_l7>;
 	v3p3-supply = <&pm8909_l13>;
 };
