@@ -94,6 +94,11 @@ wcn36xx
 btqcomsmd
 EOF
 
+# bluetoothd must start AFTER dbus (parallel start races -> daemon exits ->
+# OpenRC marks it crashed and it never comes back)
+mkdir -p "$TARGET/etc/conf.d"
+echo 'rc_need="dbus"' > "$TARGET/etc/conf.d/bluetooth"
+
 # Local startup script for guaranteed Wi-Fi connection
 mkdir -p "$TARGET/etc/local.d"
 cat <<'EOF' > "$TARGET/etc/local.d/wifi.start"
