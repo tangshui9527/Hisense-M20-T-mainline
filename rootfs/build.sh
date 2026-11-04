@@ -101,11 +101,11 @@ if [ ! -f "$TARGET/usr/sbin/qrtr-ns" ]; then
     git clone -q https://github.com/linux-msm/qrtr /tmp/qrtr-src
     git -C /tmp/qrtr-src checkout -q 9dc7a88548c2
     mkdir -p "$TARGET/usr/sbin"
-    ${CROSS:-arm-linux-gnueabihf-}gcc -static -I/tmp/qrtr-src/lib -I/tmp/qrtr-src/src -o "$TARGET/usr/sbin/qrtr-ns" \
-        /tmp/qrtr-src/src/ns.c /tmp/qrtr-src/lib/qrtr.c /tmp/qrtr-src/src/addr.c \
-        /tmp/qrtr-src/src/hash.c /tmp/qrtr-src/src/map.c 2>/dev/null \
-    || ${CROSS:-arm-linux-gnueabihf-}gcc -static -I/tmp/qrtr-src -I/tmp/qrtr-src/lib -I/tmp/qrtr-src/src \
-        -o "$TARGET/usr/sbin/qrtr-ns" /tmp/qrtr-src/src/*.c /tmp/qrtr-src/lib/*.c
+    ${CROSS:-arm-linux-gnueabihf-}gcc -static -I/tmp/qrtr-src/lib -I/tmp/qrtr-src/src \
+        -o "$TARGET/usr/sbin/qrtr-ns" \
+        /tmp/qrtr-src/lib/logging.c /tmp/qrtr-src/lib/qrtr.c \
+        /tmp/qrtr-src/src/addr.c /tmp/qrtr-src/src/ns.c /tmp/qrtr-src/src/map.c \
+        /tmp/qrtr-src/src/hash.c /tmp/qrtr-src/src/waiter.c /tmp/qrtr-src/src/util.c
 fi
 
 # bluetoothd must start AFTER dbus (parallel start races -> daemon exits ->
