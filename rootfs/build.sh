@@ -63,6 +63,7 @@ chroot "$TARGET" /sbin/apk add --no-cache \
     htop \
     chrony \
     chrony-openrc \
+    libgpiod \
     ca-certificates
 
 # Clean up QEMU binary from target
@@ -100,8 +101,25 @@ fi
 if ! ip addr show wlan0 | grep -q "inet 192"; then
     udhcpc -b -i wlan0 2>/dev/null || true
 fi
+sleep 2
+chronyc makestep 2>/dev/null || true
 EOF
 chmod +x "$TARGET/etc/local.d/wifi.start"
+
+# Local startup script to turn off display & backlight for headless operation
+cat <<'EOF' > "$TARGET/etc/local.d/screen-off.start"
+#!/bin/sh
+# Turn off display backlight and panel to save power on headless server
+# GPIO 37 = Backlight Enable (MSM TLMM)
+# GPIO 25 = Display Panel Reset (MSM TLMM)
+# MPP 2 (offset 1) = Backlight PWM (PM8909)
+if which gpioset >/dev/null 2>&1; then
+    gpioset -c gpiochip0 -z 37=0 >/dev/null 2>&1 &
+    gpioset -c gpiochip0 -z 25=0 >/dev/null 2>&1 &
+    gpioset -c gpiochip1 -z 1=0 >/dev/null 2>&1 &
+fi
+EOF
+chmod +x "$TARGET/etc/local.d/screen-off.start"
 
 # Configure OpenRC runlevels
 chroot "$TARGET" /sbin/rc-update add devfs sysinit || true
