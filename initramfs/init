@@ -96,4 +96,7 @@ echo "m20-t-mainline initramfs shell (console + telnetd 0.0.0.0:23)"
 if [ -e /proc/cmdline ]; then
     grep -q m20tlin=1 /proc/cmdline && echo "(stock-marker cmdline detected -- stock kernel space)"
 fi
-exec setsid cttyhack /bin/sh
+
+while true; do
+    setsid cttyhack /bin/sh 2>/dev/null || /bin/sh -i 2>/dev/null || sleep 2
+done

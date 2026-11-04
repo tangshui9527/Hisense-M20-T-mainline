@@ -36,29 +36,29 @@
 
 	chosen {
 		stdout-path = "serial0";
+		bootargs = "console=tty0 console=ttyMSM0,115200,n8 lk2nd.pass-simplefb earlycon panic=0";
 	};
 
 	/*
 	 * MSM8909 Hisense M20-T Physical Memory Map:
-	 * Verified directly from live Android 4.4 /proc/iomem and dtb17:
-	 * Bank 0: 0x80000000 - 0x87afffff (123 MB System RAM)
-	 * Ramoops: 0x87b00000 - 0x87bfffff (1 MB in Lowmem! 100% readable by /dev/mem!)
-	 * Hole:   0x87c00000 - 0x8c5fffff (74 MB: TrustZone, Modem 65MB, Peripheral 5MB)
-	 * Bank 1: 0x8c600000 - 0xbfffffff (826 MB System RAM)
-	 *
-	 * Both 'memory' and 'memory@80000000' are declared:
-	 * 1) 'memory' (plain) satisfies lk2nd's fdt_path_offset("/memory")
-	 * 2) 'memory@80000000' satisfies standard OF/FDT unit-address conventions.
+	 * Verified directly from live Android 4.4 /proc/iomem and dmesg:
+	 * Bank 0:  0x80000000 - 0x878fffff (121 MB System RAM)
+	 * Ramoops: 0x87900000 - 0x879fffff (1 MB in Lowmem! 100% readable by /dev/mem!)
+	 * TZ-apps: 0x87a00000 - 0x87bfffff (2 MB, from qcom-msm8909.dtsi)
+	 * RMTFS+:  0x87c00000 - 0x87ffffff (4 MB, from qcom-msm8909.dtsi)
+	 * Modem:   0x88000000 - 0x8c0fffff (65 MB Modem ADSP)
+	 * Pronto:  0x8c100000 - 0x8c5fffff (5 MB Pronto WCNSS subsystem)
+	 * Bank 1:  0x8c600000 - 0xbfffffff (826 MB System RAM)
 	 */
 	memory {
 		device_type = "memory";
-		reg = <0x80000000 0x07b00000>,
+		reg = <0x80000000 0x07a00000>,
 		      <0x8c600000 0x33a00000>;
 	};
 
 	memory@80000000 {
 		device_type = "memory";
-		reg = <0x80000000 0x07b00000>,
+		reg = <0x80000000 0x07a00000>,
 		      <0x8c600000 0x33a00000>;
 	};
 
@@ -67,28 +67,16 @@
 		#size-cells = <1>;
 		ranges;
 
-		/* Ramoops / PStore in Lowmem (1MB at 0x87b00000) */
-		ramoops: ramoops@87b00000 {
+		/* Ramoops / PStore in Lowmem (1MB at 0x87900000, outside tz-apps) */
+		ramoops: ramoops@87900000 {
 			compatible = "ramoops";
-			reg = <0x87b00000 0x00100000>;
+			reg = <0x87900000 0x00100000>;
 			record-size = <0x20000>;
 			console-size = <0x40000>;
 			pmsg-size = <0x20000>;
 		};
 
-		/* External image reserve (4MB) */
-		external_image: extimg@87c00000 {
-			reg = <0x87c00000 0x00400000>;
-			no-map;
-		};
-
-		/* Modem/ADSP baseband firmware (65MB) - TrustZone XPU protected! */
-		modem_adsp: modem@88000000 {
-			reg = <0x88000000 0x04100000>;
-			no-map;
-		};
-
-		/* Peripheral subsystem (5MB) - TrustZone protected! */
+		/* Peripheral/Pronto subsystem (5MB) - TrustZone protected */
 		peripheral: periph@8c100000 {
 			reg = <0x8c100000 0x00500000>;
 			no-map;
@@ -152,11 +140,7 @@
 };
 
 &wcnss {
-	status = "okay";
-};
-
-&wcnss_iris {
-	compatible = "qcom,wcn3620";
+	status = "disabled";
 };
 
 &smd_rpm_regulators {
