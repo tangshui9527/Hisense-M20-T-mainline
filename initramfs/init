@@ -1,5 +1,5 @@
 #!/busybox sh
-# initramfs /init for m20-t-mainline -- RAM-root rescue/control stage.
+# initramfs /init for m20-t-mainline -- RAM-root rescue & switch_root stage.
 # Exposes CDC-ACM USB Serial Console (/dev/ttyGS0 -> macOS /dev/cu.usbmodem*)
 
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin
@@ -9,7 +9,7 @@ export PATH=/bin:/sbin:/usr/bin:/usr/sbin
 /busybox --install -s /sbin 2>/dev/null
 
 # Basic virtual filesystems
-mkdir -p /proc /sys /dev /tmp /config /dev/pts /run /bin /sbin
+mkdir -p /proc /sys /dev /tmp /config /dev/pts /run /bin /sbin /newroot
 busybox mount -t proc     none /proc     2>/dev/null || true
 busybox mount -t sysfs    none /sys      2>/dev/null || true
 busybox mount -t devtmpfs none /dev      2>/dev/null || true
@@ -43,7 +43,6 @@ clear_lk2nd_attempts() {
 clear_lk2nd_attempts
 
 # --- USB Gadget Handler ---
-# Check if g_serial (built-in) is active
 UDC=$(ls /sys/class/udc 2>/dev/null | busybox head -n 1)
 klog "Detected UDC: ${UDC:-none}"
 
@@ -75,6 +74,66 @@ if [ ! -c /dev/ttyGS0 ] && [ -f /sys/class/tty/ttyGS0/dev ]; then
     IFS=: read -r maj min < /sys/class/tty/ttyGS0/dev
     busybox mknod /dev/ttyGS0 c "$maj" "$min" 2>/dev/null
 fi
+
+# --- Mount Userdata & Provision / Switch Root ---
+USERDATA="/dev/mmcblk0p29"
+NEWROOT="/newroot"
+
+# Wait up to 5 seconds for eMMC block devices
+for i in 1 2 3 4 5; do
+    [ -b "$USERDATA" ] && break
+    busybox sleep 1
+done
+
+if [ -b "$USERDATA" ]; then
+    klog "Mounting userdata ($USERDATA) on $NEWROOT..."
+    busybox mount -t ext4 -o noatime "$USERDATA" "$NEWROOT" 2>/dev/null || \
+    busybox mount "$USERDATA" "$NEWROOT" 2>/dev/null
+fi
+
+if [ -d "$NEWROOT" ] && [ -b "$USERDATA" ]; then
+    # Check if Alpine rootfs is installed
+    if [ ! -f "$NEWROOT/sbin/init" ] && [ -f /alpine-rootfs.tar.gz ]; then
+        klog "Provisioning Alpine rootfs onto $USERDATA..."
+        busybox tar -xzf /alpine-rootfs.tar.gz -C "$NEWROOT"
+
+        # Install kernel modules
+        if [ -d /lib/modules ]; then
+            mkdir -p "$NEWROOT/lib/modules"
+            busybox cp -a /lib/modules/* "$NEWROOT/lib/modules/" 2>/dev/null || true
+        fi
+
+        # Extract Wi-Fi firmware from modem (p1) and system (p21)
+        klog "Extracting Wi-Fi firmware from on-device partitions..."
+        mkdir -p /mnt_p1 /mnt_p21
+        if busybox mount -r -t vfat /dev/mmcblk0p1 /mnt_p1 2>/dev/null; then
+            mkdir -p "$NEWROOT/lib/firmware"
+            busybox cp -f /mnt_p1/image/wcnss.* "$NEWROOT/lib/firmware/" 2>/dev/null || true
+            busybox umount /mnt_p1 2>/dev/null || true
+        fi
+        if busybox mount -r -t ext4 /dev/mmcblk0p21 /mnt_p21 2>/dev/null; then
+            mkdir -p "$NEWROOT/lib/firmware/wlan/prima"
+            busybox cp -f /mnt_p21/etc/firmware/wlan/prima/WCNSS* "$NEWROOT/lib/firmware/wlan/prima/" 2>/dev/null || true
+            busybox umount /mnt_p21 2>/dev/null || true
+        fi
+
+        busybox sync
+        klog "Alpine rootfs provisioning finished."
+    fi
+
+    # Check for rescue override
+    if grep -q "m20t.rescue" /proc/cmdline 2>/dev/null; then
+        klog "Rescue mode requested via cmdline; staying in initramfs."
+    elif [ -x "$NEWROOT/sbin/init" ]; then
+        klog "Switching root to $NEWROOT..."
+        busybox mount --move /sys "$NEWROOT/sys" 2>/dev/null || true
+        busybox mount --move /proc "$NEWROOT/proc" 2>/dev/null || true
+        busybox mount --move /dev "$NEWROOT/dev" 2>/dev/null || true
+        exec /busybox switch_root "$NEWROOT" /sbin/init
+    fi
+fi
+
+klog "switch_root skipped or failed; falling back to rescue shell."
 
 # Background task: Monitor /dev/ttyGS0 and spawn root shell
 (

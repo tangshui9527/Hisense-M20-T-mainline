@@ -26,7 +26,7 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y -q \
             gcc-arm-linux-gnueabihf bison flex bc cpio libssl-dev \
-            python3 ccache curl tar
+            python3 ccache curl tar qemu-user-static binfmt-support
           echo "/usr/lib/ccache" >> "$GITHUB_PATH"
 
       - uses: actions/checkout@v4
@@ -98,6 +98,9 @@ jobs:
           tar -C modout -caf modules.tar.xz lib/modules
           ls -l modules.tar.xz
 
+      - name: Build Alpine rootfs package
+        run: bash rootfs/build.sh
+
       - name: Build initramfs
         run: bash initramfs/build.sh
 
@@ -126,6 +129,7 @@ jobs:
              linux/arch/arm/boot/dts/qcom/$DTB.dtb \
              initramfs/initramfs.cpio.gz \
              modules.tar.xz \
+             rootfs/alpine-rootfs.tar.gz \
              kernel-info.txt \
              out/
           ccache -s || true

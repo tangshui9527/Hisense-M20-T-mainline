@@ -45,8 +45,17 @@ ln -sf /busybox "$STAGE/bin/ash"
 ln -sf /busybox "$STAGE/sbin/init"
 install -m 0755 init "$STAGE/init"
 install -m 0755 setup-ncm.sh "$STAGE/etc/setup-ncm.sh"
-if [ -f "lib/modules/7.0.0-msm8909+/kernel/drivers/power/supply/pm8916_lbc.ko" ]; then
-    cp "lib/modules/7.0.0-msm8909+/kernel/drivers/power/supply/pm8916_lbc.ko" "$STAGE/lib/modules/pm8916_lbc.ko"
+
+if [ -f "../rootfs/alpine-rootfs.tar.gz" ]; then
+    echo "[initramfs] embedding alpine-rootfs.tar.gz into initramfs..."
+    cp "../rootfs/alpine-rootfs.tar.gz" "$STAGE/alpine-rootfs.tar.gz"
+fi
+
+if [ -d "../modout/lib/modules" ]; then
+    echo "[initramfs] embedding kernel modules..."
+    cp -a "../modout/lib/modules" "$STAGE/lib/"
+elif [ -d "lib/modules" ]; then
+    cp -a "lib/modules" "$STAGE/lib/"
 fi
 
 (cd "$STAGE" && find . | cpio -o -H newc --owner=0:0 2>/dev/null) | gzip -9 > initramfs.cpio.gz

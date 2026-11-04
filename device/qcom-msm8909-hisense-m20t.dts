@@ -31,6 +31,7 @@
 
 	aliases {
 		mmc0 = &sdhc_1;
+		mmc1 = &sdhc_2;
 		serial0 = &blsp_uart1;
 	};
 
@@ -124,7 +125,10 @@
 };
 
 &sdhc_2 {
-	status = "disabled";
+	broken-cd;
+	no-1-8-v;
+	cap-sd-highspeed;
+	status = "okay";
 };
 
 &usb {
@@ -141,7 +145,12 @@
 };
 
 &wcnss {
-	status = "disabled";
+	status = "okay";
+};
+
+&wcnss_iris {
+	compatible = "qcom,wcn3620";
+	status = "okay";
 };
 
 &smd_rpm_regulators {
