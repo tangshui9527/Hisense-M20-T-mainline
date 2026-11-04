@@ -124,7 +124,8 @@ jobs:
               --bootimg m20t-$BOARD.img
           done
           ls -l m20t-*.img
-          [ "$(stat -c%s m20t-$DTB.img)" -lt 33554432 ] || { echo "BOOT IMAGE TOO BIG"; exit 1; }
+          # slot limit: 31 MiB boot partition minus the 512 KiB lk2nd head
+          [ "$(stat -c%s m20t-$DTB.img)" -lt 31981568 ] || { echo "BOOT IMAGE TOO BIG"; exit 1; }
 
       - name: Collect artifacts
         run: |

@@ -46,16 +46,23 @@ ln -sf /busybox "$STAGE/sbin/init"
 install -m 0755 init "$STAGE/init"
 install -m 0755 setup-ncm.sh "$STAGE/etc/setup-ncm.sh"
 
-if [ -f "../rootfs/alpine-rootfs.tar.gz" ]; then
+# The boot slot is only ~30.5 MiB (31 MiB boot partition minus the 512 KiB
+# lk2nd head).  The rootfs lives on the userdata partition (ext4 built-in),
+# so neither the rootfs tarball nor kernel modules are needed here by
+# default; opt in with EMBED_ROOTFS=1 / EMBED_MODULES=1 for first-install
+# images.
+if [ "${EMBED_ROOTFS:-0}" = "1" ] && [ -f "../rootfs/alpine-rootfs.tar.gz" ]; then
     echo "[initramfs] embedding alpine-rootfs.tar.gz into initramfs..."
     cp "../rootfs/alpine-rootfs.tar.gz" "$STAGE/alpine-rootfs.tar.gz"
 fi
 
-if [ -d "../modout/lib/modules" ]; then
-    echo "[initramfs] embedding kernel modules..."
-    cp -a "../modout/lib/modules" "$STAGE/lib/"
-elif [ -d "lib/modules" ]; then
-    cp -a "lib/modules" "$STAGE/lib/"
+if [ "${EMBED_MODULES:-0}" = "1" ]; then
+    if [ -d "../modout/lib/modules" ]; then
+        echo "[initramfs] embedding kernel modules..."
+        cp -a "../modout/lib/modules" "$STAGE/lib/"
+    elif [ -d "lib/modules" ]; then
+        cp -a "lib/modules" "$STAGE/lib/"
+    fi
 fi
 
 (cd "$STAGE" && find . | cpio -o -H newc --owner=0:0 2>/dev/null) | gzip -9 > initramfs.cpio.gz
