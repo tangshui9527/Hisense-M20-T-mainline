@@ -104,7 +104,7 @@ jobs:
           ls -l modules.tar.xz
 
       - name: Build Alpine rootfs package
-        run: bash rootfs/build.sh
+        run: sudo bash rootfs/build.sh
 
       - name: Build initramfs
         run: bash initramfs/build.sh

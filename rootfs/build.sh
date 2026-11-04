@@ -132,5 +132,6 @@ mkdir -p "$TARGET/lib/firmware/wlan/prima"
 # Pack rootfs tarball
 echo "[rootfs] Packaging alpine-rootfs.tar.gz..."
 tar -czf "$SCRIPT_DIR/alpine-rootfs.tar.gz" -C "$TARGET" .
+chmod 0644 "$SCRIPT_DIR/alpine-rootfs.tar.gz"
 ls -lh "$SCRIPT_DIR/alpine-rootfs.tar.gz"
 echo "[rootfs] Alpine rootfs package successfully built!"
