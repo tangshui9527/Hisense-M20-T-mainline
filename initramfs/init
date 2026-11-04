@@ -18,11 +18,16 @@ busybox mount -t tmpfs    none     /tmp
 busybox mount -t configfs none     /config
 
 LOG=/tmp/boot.log
+klog() {
+    echo "<1>M20T: $*" > /dev/kmsg 2>/dev/null
+    echo "$*" >> $LOG
+}
 {
     echo "== m20-t-mainline initramfs =="
     date -u
     echo "kernel: $(uname -a)"
 } > $LOG
+klog "initramfs started on $(uname -a)"
 
 # --- clear lk2nd boot-failure marker ----------------------------------------
 clear_lk2nd_attempts() {
@@ -45,7 +50,7 @@ clear_lk2nd_attempts
 
 # --- USB Gadget Bringup (ACM Serial + NCM Network) --------------------------
 setup_usb_gadget() {
-    echo "[usb] Setting up configfs gadget..." >> $LOG
+    klog "[usb] Setting up configfs gadget..."
     mkdir -p /config/usb_gadget/g1 || return 1
     cd /config/usb_gadget/g1
 
@@ -69,30 +74,36 @@ setup_usb_gadget() {
     ln -sf functions/acm.usb0 configs/c.1/acm
     ln -sf functions/ncm.usb0 configs/c.1/ncm
 
-    # Wait up to 20 seconds for UDC to probe
-    echo "[usb] Waiting for UDC controller..." >> $LOG
+    # Wait up to 10 seconds for UDC to probe
+    klog "[usb] Waiting for UDC controller..."
     UDC=""
-    for i in $(busybox seq 1 20); do
+    for i in $(busybox seq 1 10); do
         UDC=$(ls /sys/class/udc 2>/dev/null | busybox head -n 1)
         [ -n "$UDC" ] && break
         sleep 1
     done
 
     if [ -z "$UDC" ]; then
-        echo "[usb] ERROR: No UDC appeared after 20s" >> $LOG
+        klog "[usb] ERROR: No UDC appeared after 10s!"
+        klog "[usb] Diagnostics:"
+        klog "[usb] /sys/class/udc: $(ls /sys/class/udc 2>/dev/null)"
+        klog "[usb] platform devices: $(ls -d /sys/bus/platform/devices/*usb* 2>/dev/null)"
+        busybox dmesg | busybox grep -i -E "usb|phy|ci_hdrc|udc|pm8909|regulator" | while read -r line; do
+            klog "[kmsg] $line"
+        done
         return 1
     fi
 
-    echo "[usb] Found UDC: $UDC, binding gadget..." >> $LOG
-    echo "$UDC" > UDC || { echo "[usb] ERROR: UDC bind failed" >> $LOG; return 1; }
-    echo "[usb] Gadget successfully bound to $UDC" >> $LOG
+    klog "[usb] Found UDC: $UDC, binding gadget..."
+    echo "$UDC" > UDC || { klog "[usb] ERROR: UDC bind failed"; return 1; }
+    klog "[usb] Gadget successfully bound to $UDC"
 
     # Configure NCM network interface
     sleep 1
     if busybox ifconfig usb0 172.16.42.1 netmask 255.255.255.0 up 2>>$LOG; then
-        echo "[usb] NCM network UP: 172.16.42.1" >> $LOG
+        klog "[usb] NCM network UP: 172.16.42.1"
     else
-        echo "[usb] WARNING: ifconfig usb0 failed" >> $LOG
+        klog "[usb] WARNING: ifconfig usb0 failed"
     fi
 
     return 0

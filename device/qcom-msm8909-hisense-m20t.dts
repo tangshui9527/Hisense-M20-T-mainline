@@ -36,7 +36,7 @@
 
 	chosen {
 		stdout-path = "serial0";
-		bootargs = "console=tty0 console=ttyMSM0,115200,n8 lk2nd.pass-simplefb earlycon panic=0";
+		bootargs = "console=tty0 console=ttyMSM0,115200,n8 lk2nd.pass-simplefb lk2nd.pass-ramoops earlycon panic=0";
 	};
 
 	/*
