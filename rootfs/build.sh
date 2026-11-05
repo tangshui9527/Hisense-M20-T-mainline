@@ -117,6 +117,42 @@ fi
 mkdir -p "$TARGET/etc/conf.d"
 echo 'rc_need="dbus"' > "$TARGET/etc/conf.d/bluetooth"
 
+# Hardened OpenRC init script for bluetoothd (waits for D-Bus socket to avoid startup race)
+cat <<'EOF' > "$TARGET/etc/init.d/bluetooth"
+#!/sbin/openrc-run
+
+name="Bluetooth"
+command="/usr/lib/bluetooth/bluetoothd"
+pidfile="/run/bluetoothd.pid"
+command_background=true
+
+depend() {
+	after coldplug udev-postmount
+	need dbus localmount hostname
+}
+
+start_pre() {
+	ebegin "Waiting for D-Bus system bus"
+	local i
+	for i in $(seq 1 20); do
+		[ -S /run/dbus/system_bus_socket ] && break
+		sleep 0.5
+	done
+	eend 0
+}
+
+start_post() {
+	sleep 1
+	if ! kill -0 "$(cat "$pidfile" 2>/dev/null)" 2>/dev/null; then
+		ewarn "bluetoothd exited immediately, retrying once"
+		start-stop-daemon --start --background --make-pidfile \
+			--pidfile "$pidfile" --exec "$command" >/dev/null 2>&1
+	fi
+	return 0
+}
+EOF
+chmod +x "$TARGET/etc/init.d/bluetooth"
+
 # Local startup script for guaranteed Wi-Fi connection
 mkdir -p "$TARGET/etc/local.d"
 cat <<'EOF' > "$TARGET/etc/local.d/wifi.start"
