@@ -1,6 +1,6 @@
-# m20-t-mainline
+# Hisense-M20-T-mainline
 
-[![CI Build](https://github.com/tangshui9527/m20-t-mainline/actions/workflows/build.yml/badge.svg?branch=lk2nd-m20t)](https://github.com/tangshui9527/m20-t-mainline/actions/workflows/build.yml)
+[![CI Build](https://github.com/tangshui9527/Hisense-M20-T-mainline/actions/workflows/build.yml/badge.svg?branch=lk2nd-m20t)](https://github.com/tangshui9527/Hisense-M20-T-mainline/actions/workflows/build.yml)
 [![Kernel](https://img.shields.io/badge/Linux-7.0.0--msm8909+-blue.svg)](https://github.com/weikaizhi4/linux)
 [![Distro](https://img.shields.io/badge/Alpine%20Linux-3.21%20armhf-teal.svg)](https://alpinelinux.org/)
 [![License](https://img.shields.io/badge/License-GPL--2.0-yellow.svg)](LICENSE)

@@ -2,7 +2,7 @@
 
 > **Target Device**: Hisense M20-T (Uniscope ODM, Qualcomm Snapdragon 210 / MSM8909, `soc_id 245 / 0xf5`)  
 > **Target OS**: Mainline Linux 7.0 + Alpine Linux 3.21 (Headless Server)  
-> **Author**: m20-t-mainline Project Contributors  
+> **Author**: Hisense-M20-T-mainline Project Contributors  
 
 ---
 
