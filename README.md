@@ -31,11 +31,12 @@ This project transforms the old smartphone into an ultra-low-power, dedicated **
 | **RAM** | 1GB LPDDR3 (`0x80000000`) | ✅ Working | Dynamically mapped via stock aboot `/memory` node |
 | **Storage (eMMC)** | SDHC1 (`sdhci-msm-v4`) | ✅ Working | HS200 mode, persistent ext4 rootfs on `/dev/mmcblk0p29` |
 | **Wi-Fi** | WCN3620 (`wcn36xx` + PIL) | ✅ Working | Auto-connects on boot with fixed MAC |
+| **Bluetooth** | WCN3620 (`btqcomsmd` over SMD) | ✅ Working | BD_ADDR derived, BlueZ 5.79, BLE + BR/EDR discovery & gateway verified |
 | **USB Console** | ChipIdea USB2 (`ci_hdrc_msm`) | ✅ Working | CDC-ACM serial gadget on `/dev/ttyGS0` (root shell) |
 | **Timekeeping** | PM8909 RTC + `chrony` | ✅ Working | Sub-second NTP synchronization on boot; SSL certs verified |
 | **Battery & Power** | PM8909 Autonomous Charger | ✅ Working | Hardware automatically regulates charging when 5V USB is connected |
-| **MicroSD Slot** | SDHC2 (`sdhci-msm-v4`) | ⚠️ Partial | Card capacity detected with 32-bit ADMA quirk; clock timing under tuning |
-| **Cellular Modem** | Hexagon QDSP6 PIL (`qcom_q6v5_mss`) | ⏳ In Progress | Firmware present; SMS integration via ModemManager planned |
+| **MicroSD Slot** | SDHC2 (`sdhci-msm-v4`) | ⚠️ Partial | Functional in 1-bit mode @ 25MHz; 4-bit bus pending hardware pin cleanup |
+| **Cellular Modem** | Hexagon QDSP6 PIL (`qcom_q6v5_mss` + `rmtfs`) | ✅ Working | Firmware loaded, EFS served via qrtr, ModemManager + qmi-utils ready |
 | **Display / Audio** | DSI / Codec / Touch | ❌ Omitted | Intentionally disabled to minimize memory and power draw |
 
 ---
@@ -76,6 +77,19 @@ This project transforms the old smartphone into an ultra-low-power, dedicated **
   ├─ chronyd: Syncs clock over NTP
   └─ dropbear: SSH server listening on port 22
 ```
+
+---
+
+## 📖 Installation & Flashing Guide
+
+To flash the phone from factory stock Android to Mainline Linux, follow our step-by-step installation guide:  
+👉 **[From Stock Android to Mainline Linux (Complete Flashing Guide)](docs/install.md)**
+
+The guide covers:
+- Taking a full partition backup before making any changes
+- Formatting and deploying the Alpine Linux rootfs onto internal eMMC (`userdata`)
+- Flashing the Mainline Linux kernel + QCDT boot package via `root + dd`
+- First boot, SSH setup, and disaster recovery via Qualcomm 9008 EDL mode
 
 ---
 

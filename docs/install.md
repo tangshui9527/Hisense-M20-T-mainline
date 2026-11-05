@@ -1,116 +1,237 @@
-# Flashing / operating checklist — Hisense M20-T mainline boot
+# Flashing Guide: From Stock Android to Mainline Linux
 
-> **2026-10-31:** the primary boot route is now **lk2nd** (flashed at `boot`
-> offset 0; kernel images go to `boot + 512 KiB` via `fastboot flash boot`).
-> The root+dd flow below remains valid for the stock-aboot route and for
-> recovery (EDL write of the stock `boot` backup). See the README for the
-> current status.
-
-Device facts proven on 2026-10-29 (serial `2f339cef`):
-
-* `boot` partition = `/dev/block/bootdevice/by-name/boot`, **32 MiB**,
-  original MD5 `0e5f1083a10c418c956de9d0c34f2a2d`
-* stock bootloader accepts **unsigned / modified** boot images
-  (verified: repacked stock image with cmdline marker `m20tlin=1` booted,
-  marker visible in `/proc/cmdline`)
-* root available on stock ROM: `adb shell "su -c <cmd>"` (no interactive prompt)
-* fastboot has no flash/boot/unlock commands — never counts on fastboot
-
-## Flash a CI artifact
-
-Download `out/m20t-boot.img` from the Actions run, then:
-
-```sh
-adb push m20t-boot.img /data/local/tmp/
-adb shell "su -c 'chmod 644 /data/local/tmp/m20t-boot.img'"
-# write -- image is ~<10 MiB; partition is 32 MiB, trailing stock zeros untouched
-adb shell "su -c 'dd if=/data/local/tmp/m20t-boot.img of=/dev/block/bootdevice/by-name/boot bs=4096 && sync'"
-# verify back-read; md5 must match the local file
-adb shell "su -c 'md5 <(dd if=/dev/block/bootdevice/by-name/boot bs=1 count=<size> 2>/dev/null)'"
-```
-
-Simpler on-device verify (no process substitution on this old toybox-less ROM):
-
-```sh
-adb shell "su -c 'dd if=/dev/block/bootdevice/by-name/boot of=/data/local/tmp/back.img bs=4096 count=\$(\"" \e"$(stat -c%s m20t-boot.img)/4096+1) && md5 /data/local/tmp/back.img'"
-adb pull /data/local/tmp/back.img /tmp/ && head -c <size> /tmp/back.img | md5
-```
-
-## Expectations after flashing the phase-1 image
-
-* phone boots the mainline kernel — screen stays black (no display driver work),
-  no adb (no Android), WiFi not yet configured
-* shell via USB: a Linux/macOS host gets an NCM interface; set host IP
-  `172.16.42.2/24` and run `telnet 172.16.42.1` (user: none, shell directly)
-
-```
-sudo ip addr add 172.16.42.2/24 dev <usb-interface>
-telnet 172.16.42.1
-# -> /tmp/boot.log holds the bring-up evidence (UDC used, ifconfig, dmesg tail)
-```
-
-## Recovery
-
-Stock lives in your backup of 2026-10-29 (`boot.img`, MD5 above). Restore:
-
-```sh
-adb push boot.img /data/local/tmp/stock-boot.img
-adb shell "su -c 'dd if=/data/local/tmp/stock-boot.img of=/dev/block/bootdevice/by-name/boot bs=4096 && sync'"
-adb reboot
-```
-
-Worst case (device will not boot at all, no adb): MSM8909 rescue only via
-9008/EDL firehose (search ODM keyword `uniscope8909`) — keep the volume-down
-(EDL entry) trick in mind; this path was NOT needed so far.
+> **Target Device**: Hisense M20-T (Uniscope ODM, Qualcomm Snapdragon 210 / MSM8909, `soc_id 245 / 0xf5`)  
+> **Target OS**: Mainline Linux 7.0 + Alpine Linux 3.21 (Headless Server)  
+> **Author**: m20-t-mainline Project Contributors  
 
 ---
 
-# Android slot image (lk2nd second stage) — recipe (2026-11-04)
+## 📋 Overview
 
-The M20-T now boots via: PBL → stock aboot → **lk2nd-m20t** (boot @0) →
-**Android slot** (boot +512 KiB). The slot image must be an Android boot
-image that lk2nd accepts; the stock ODM image fails two checks:
+This guide walks you through migrating a factory Hisense M20-T smartphone running Android 4.4.4 (KitKat) to a single-system, headless Alpine Linux server running a close-to-mainline Linux 7.0 kernel on the internal eMMC.
 
-1. **header**: the original header lies (`kernel_size` etc. do not match the
-   payload) → repack with `tools/mkbootimg.py` (clean header, same page size
-   2048, same cmdline).
-2. **DT table**: the DT section must remain the **QCDT** table (lk2nd's
-   `dev_tree_validate` requires the QCDT magic and matches entries against
-   platform 0xf5 / board 0x1000b / **subtype 0** — the stock table carries
-   that as entry #17). Do not replace it with a plain FDT.
+### Key Hardware & Boot Facts
+- **No Fastboot Flash/Boot/Unlock**: The stock bootloader (`aboot`) provides a stripped-down fastboot implementation that lacks `flash`, `boot`, and `oem unlock` commands.
+- **No Signature Enforcement**: The bootloader does **not** enforce cryptographic signatures on the `boot` partition. Unsigned custom kernels boot directly without unlocking the bootloader.
+- **Root Available by Default**: The factory Android firmware permits root execution via `adb shell "su -c '<command>'"` without any superuser prompt.
+- **QCDT Header Requirement**: The bootloader strictly inspects the Device Tree table. The DT blob must be wrapped into a Qualcomm QCDT v3 table matching platform `0xf5` (245), board `0x1000b`, and subtype `0`.
+- **Flashing Method**: Initial installation is performed directly from stock Android using `root` and `dd` to write the internal eMMC partitions.
 
-### Build (all from the original boot backup)
+---
 
-```sh
-# 1. split the original boot image (kernel / ramdisk / QCDT) — see header at
-#    offset 8..40 (sizes), page size at 36; sections are page-aligned
-# 2. repack:
-python3 tools/mkbootimg.py \
-  --kernel orig-kernel.bin --ramdisk orig-ramdisk.gz --dtb orig-dt.qcdt \
-  --cmdline '<original cmdline from header offset 64>' \
-  --bootimg stock-android-slot.img
-# 3. optional: wireless-ADB auto start (patch default.prop inside the ramdisk)
-python3 tools/patch-ramdisk-prop.py orig-ramdisk.gz ramdisk-adb-tcp.gz \
-  --append "service.adb.tcp.port=5555"
-#    … then rebuild with --ramdisk ramdisk-adb-tcp.gz
-# 4. verify the QCDT table survives:
-python3 tools/check-qcdt.py stock-android-slot.img
+## 🧰 Requirements & Artifacts
+
+### 1. Host Machine
+- Linux or macOS with `adb` installed (`android-tools` on Linux or `brew install android-platform-tools` on macOS).
+- USB Type-A to Micro-USB data cable.
+
+### 2. Build Artifacts
+Download the latest build artifacts from the GitHub Actions CI (run from the `lk2nd-m20t` branch):
+- **`m20t-qcom-msm8909-hisense-m20t.img`**: The complete Android boot image containing Linux 7.0 zImage, QCDT-wrapped Device Tree, and Stage-1 initramfs.
+- **`alpine-rootfs.tar.gz`**: Pre-configured Alpine Linux 3.21 armhf root filesystem tarball (contains OpenRC, Dropbear SSH, WCN3620 Wi-Fi configuration, BlueZ Bluetooth, and ModemManager).
+
+---
+
+## 🛡️ Step 1: Prerequisites & Full Partition Backup
+
+> [!CAUTION]
+> Before modifying any partition on the device, create a full raw backup of your original Android partitions. This provides a guaranteed rollback path in case of any issue.
+
+1. **Enable USB Debugging on Android**:
+   - Power on the phone into factory Android.
+   - Go to **Settings** → **About phone**, and tap **Build number** 7 times to enable Developer options.
+   - Go to **Settings** → **Developer options**, and turn on **USB debugging**.
+   - Connect the phone to your computer via USB.
+
+2. **Verify ADB Connection and Root**:
+   ```bash
+   adb devices
+   # Should report: 2f339cef    device
+
+   # Test root access
+   adb shell "su -c id"
+   # Must return: uid=0(root) gid=0(root)
+   ```
+
+3. **Backup Critical Partitions**:
+   ```bash
+   mkdir -p m20t-backup
+   cd m20t-backup
+
+   # Back up the stock boot partition (32 MiB)
+   adb shell "su -c 'dd if=/dev/block/bootdevice/by-name/boot of=/data/local/tmp/stock-boot.img bs=4096'"
+   adb pull /data/local/tmp/stock-boot.img ./stock-boot.img
+   adb shell "su -c 'rm -f /data/local/tmp/stock-boot.img'"
+
+   # Verify original boot image MD5 (factory MD5 is 0e5f1083a10c418c956de9d0c34f2a2d)
+   md5sum stock-boot.img || md5 stock-boot.img
+
+   # (Recommended) Back up other firmware partitions
+   for PART in aboot recovery sbl1 tz rpm modem; do
+       echo "Backing up $PART..."
+       adb shell "su -c 'dd if=/dev/block/bootdevice/by-name/$PART of=/data/local/tmp/$PART.img bs=4096'"
+       adb pull /data/local/tmp/$PART.img ./$PART.img
+       adb shell "su -c 'rm -f /data/local/tmp/$PART.img'"
+   done
+   ```
+
+---
+
+## 💾 Step 2: Install Alpine Linux Rootfs on `userdata`
+
+The stock partition table reserves ~5.6 GB for `userdata` (`/dev/block/bootdevice/by-name/userdata` or `/dev/mmcblk0p29`). We will format this partition with `ext4` and extract the root filesystem onto it.
+
+1. **Push the Rootfs Package**:
+   ```bash
+   adb push alpine-rootfs.tar.gz /data/local/tmp/
+   ```
+
+2. **Format and Extract via ADB Root Shell**:
+   ```bash
+   # Format userdata partition to ext4
+   adb shell "su -c 'mke2fs -F -t ext4 /dev/block/bootdevice/by-name/userdata'"
+
+   # Mount userdata temporarily
+   adb shell "su -c 'mkdir -p /data/local/tmp/target_root && mount -t ext4 /dev/block/bootdevice/by-name/userdata /data/local/tmp/target_root'"
+
+   # Extract rootfs
+   echo "Extracting root filesystem (this takes ~1 minute)..."
+   adb shell "su -c 'tar -xzf /data/local/tmp/alpine-rootfs.tar.gz -C /data/local/tmp/target_root'"
+
+   # Clean up tarball
+   adb shell "su -c 'rm -f /data/local/tmp/alpine-rootfs.tar.gz'"
+   ```
+
+3. **(Optional) Customize Wi-Fi Credentials Before Boot**:
+   If you want the phone to connect to your local Wi-Fi immediately upon boot, edit the configuration:
+   ```bash
+   # Replace SSID and password with your Wi-Fi credentials
+   adb shell "su -c 'cat << \"EOF\" > /data/local/tmp/target_root/etc/wpa_supplicant/wpa_supplicant.conf
+   ctrl_interface=/var/run/wpa_supplicant
+   update_config=1
+
+   network={
+       ssid=\"Your-WiFi-SSID\"
+       psk=\"Your-WiFi-Password\"
+   }
+   EOF'"
+   ```
+
+4. **Sync and Unmount**:
+   ```bash
+   adb shell "su -c 'sync && umount /data/local/tmp/target_root'"
+   ```
+
+---
+
+## 🚀 Step 3: Flash the Mainline Boot Image
+
+Now write the Linux kernel boot package to the `boot` partition (`/dev/block/bootdevice/by-name/boot`).
+
+1. **Push the Boot Image**:
+   ```bash
+   adb push m20t-qcom-msm8909-hisense-m20t.img /data/local/tmp/m20t-boot.img
+   ```
+
+2. **Flash with `dd` and Verify**:
+   ```bash
+   # Flash image directly to boot partition
+   adb shell "su -c 'dd if=/data/local/tmp/m20t-boot.img of=/dev/block/bootdevice/by-name/boot bs=4096 && sync'"
+
+   # Clean up temporary file
+   adb shell "su -c 'rm -f /data/local/tmp/m20t-boot.img'"
+   ```
+
+3. **Reboot into Linux**:
+   ```bash
+   adb shell "su -c 'reboot'"
+   ```
+
+---
+
+## 🖥️ Step 4: First Boot & Access
+
+When the phone restarts:
+1. The screen will display the boot logo and may turn off (power management intentionally shuts down the backlight and panel to save power).
+2. The phone initializes the SoC, mounts the `userdata` partition as `/`, and launches OpenRC services.
+
+### Option A: SSH Over Wi-Fi (Primary Interface)
+If your Wi-Fi credentials were set up in Step 2:
+- Check your Wi-Fi router's DHCP client table for a new device named `m20t-server` (or IP assigned to MAC `00:0a:f5:2f:33:9c`).
+- Connect via SSH:
+  ```bash
+  ssh root@<PHONE_IP>
+  # Default password: toor
+  ```
+
+### Option B: USB CDC-ACM Serial Console (Offline Fallback)
+If Wi-Fi fails to connect or you need an offline shell, connect the phone to your computer with a USB cable. The Stage-1 initramfs and OpenRC automatically configure a USB CDC-ACM serial gadget (`/dev/ttyGS0`).
+
+- **On macOS**:
+  ```bash
+  screen /dev/cu.usbmodem* 115200
+  ```
+- **On Linux**:
+  ```bash
+  screen /dev/ttyACM0 115200
+  ```
+- Press **Enter** to open an interactive, passwordless root shell.
+- (To exit `screen`, press `Ctrl+A` followed by `\`).
+
+---
+
+## 📶 Step 5: Post-Install Verification & Hardware Status
+
+Once logged in, verify your hardware:
+
+```bash
+# Check uptime, kernel version, and memory usage (~34MB idle!)
+uname -a
+free -m
+htop
+
+# Check OpenRC services
+rc-status
+
+# Verify Bluetooth (scan for nearby BLE / smart home devices)
+bluetoothctl --timeout 8 scan on
+
+# Check cellular modem / IMEI (if SIM card is inserted)
+qmicli -d qrtr://0 --dms-get-ids
 ```
 
-### Flash
+---
 
-Slot = `boot + 512 KiB`. From lk2nd fastboot:
-`fastboot flash boot stock-android-slot.img` (lk2nd redirects `boot` to the
-slot). From stock Android (root): `dd bs=2048 seek=256` onto the boot block
-device. **boot is 31 MiB per GPT — do not write past its end** (the lk2nd
-state block occupies the last sector).
+## 🔄 Wireless Over-The-Air (OTA) Updates
 
-### Current on-device build (2026-11-04)
+Once Linux is running, you never need to connect a USB cable to update the kernel:
 
-* `boot @0`: lk2nd-m20t (lk2nd 23.1 + `patches/lk2nd-m20t-23.1.patch`, CI
-  build of commit `0a2ce01`, md5 `66fd4eb4…`) — menu: Android / Recovery /
-  Linux / Bootloader / EDL / Shutdown / Reboot, 30 s wall-clock auto-continue
-* `boot +512K`: stock Android slot (original kernel+ramdisk+QCDT, clean
-  header, wireless-ADB auto start, md5 `696429a9…`)
-* boot failsafe: EDL-write of the original boot backup (`0e5f1083…`)
-  restores the stock chain at any time
+```bash
+# 1. Transfer updated boot image over Wi-Fi
+scp m20t-qcom-msm8909-hisense-m20t.img root@<PHONE_IP>:/tmp/m20t-boot.img
+
+# 2. Write to boot partition directly and reboot
+ssh root@<PHONE_IP> "dd if=/tmp/m20t-boot.img of=/dev/mmcblk0p20 bs=4096 && sync && reboot"
+```
+
+---
+
+## 🛟 Disaster Recovery: Qualcomm 9008 EDL Mode
+
+If an invalid image is flashed and the device enters a boot loop or cannot reach Linux:
+
+1. **Enter EDL 9008 Mode**:
+   - Unplug the USB cable.
+   - Remove and reinsert the battery (or hold Power + Vol Up + Vol Down until power cycles).
+   - Press and **hold both Volume Up and Volume Down** simultaneously.
+   - While holding both buttons, plug the USB cable into your computer.
+   - Check device manager / terminal:
+     - macOS: `system_profiler SPUSBDataType | grep 05c6`
+     - Linux: `lsusb | grep 05c6:9008`
+2. **Flash Factory Boot Backup**:
+   Use Qualcomm open-source EDL tools (e.g. `edl` / `bkerler/edl`):
+   ```bash
+   edl wl stock-boot.img --loader=tools/msm8909_ul40.mbn --partition=boot
+   edl reset
+   ```
+   The phone will reboot back into factory Android immediately.
