@@ -69,6 +69,9 @@ chroot "$TARGET" /sbin/apk add --no-cache \
     bluez \
     bluez-openrc \
     bluez-deprecated \
+    qmi-utils \
+    modemmanager \
+    modemmanager-openrc \
     ca-certificates
 
 # Clean up QEMU binary from target
@@ -224,7 +227,7 @@ chmod +x "$TARGET/etc/local.d/usb-gadget.start"
 # Firmware (mba.mbn, modem.*) is copied from the vfat modem partition (p1).
 cat <<'EOF' > "$TARGET/etc/local.d/modem.start"
 #!/bin/sh
-[ -c /dev/mmcblk0p11 ] || exit 0
+[ -b /dev/mmcblk0p11 ] || exit 0
 pgrep qrtr-ns >/dev/null || qrtr-ns &
 mkdir -p /dev/disk/by-partlabel
 ln -sf /dev/mmcblk0p11 /dev/disk/by-partlabel/modemst1
@@ -234,6 +237,7 @@ ln -sf /dev/mmcblk0p14 /dev/disk/by-partlabel/fsc
 pgrep rmtfs >/dev/null || (rmtfs -P -v > /tmp/rmtfs.log 2>&1 &)
 sleep 1
 [ -d /sys/class/remoteproc/remoteproc1 ] || { modprobe qcom_q6v5_mss 2>/dev/null; sleep 1; }
+modprobe rpmsg_wwan_ctrl 2>/dev/null
 R=/sys/class/remoteproc/remoteproc1
 [ -d $R ] || exit 0
 FW=/lib/firmware
@@ -272,6 +276,7 @@ chroot "$TARGET" /sbin/rc-update add networking boot || true
 chroot "$TARGET" /sbin/rc-update add local default || true
 chroot "$TARGET" /sbin/rc-update add chronyd default || true
 chroot "$TARGET" /sbin/rc-update add dropbear default || true
+chroot "$TARGET" /sbin/rc-update add modemmanager default || true
 
 # Wi-Fi: wpa_supplicant configuration
 mkdir -p "$TARGET/etc/wpa_supplicant"
