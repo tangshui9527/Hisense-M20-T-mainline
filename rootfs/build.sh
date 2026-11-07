@@ -121,7 +121,7 @@ D=/dev/hidg0
 [ -c $D ] || { echo "no $D (hid gadget not bound)"; exit 1; }
 Z='\000\000\000\000\000\000\000\000'
 tap() { # $1 modifier(0x) $2 keycode(0x)
-    printf "\\$(printf '%03o' $1)\\000\\$(printf '%03o' $2)\\000\\000\\000\\000\\000" > $D
+    printf "\\$(printf '%03o' $1)\\000\\$(printf '%03o' $((16#$2)))\\000\\000\\000\\000\\000" > $D
     usleep 15000
     printf "$Z" > $D
     usleep 15000
