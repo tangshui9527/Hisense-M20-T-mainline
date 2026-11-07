@@ -112,6 +112,50 @@ if [ ! -f "$TARGET/usr/sbin/qrtr-ns" ]; then
         /tmp/qrtr-src/src/hash.c /tmp/qrtr-src/src/waiter.c /tmp/qrtr-src/src/util.c
 fi
 
+# hidkey: type into the USB-host phone through the HID gadget
+cat <<'EOF' > "$TARGET/usr/local/bin/hidkey"
+#!/bin/sh
+# usage: hidkey "text"          — type text (US layout)
+#        hidkey -k enter|tab|esc|space|backspace|up|down|left|right|home|end
+D=/dev/hidg0
+[ -c $D ] || { echo "no $D (hid gadget not bound)"; exit 1; }
+Z='\000\000\000\000\000\000\000\000'
+tap() { # $1 modifier(0x) $2 keycode(0x)
+    printf "\\$(printf '%03o' $1)\\000\\$(printf '%03o' $2)\\000\\000\\000\\000\\000" > $D
+    usleep 15000
+    printf "$Z" > $D
+    usleep 15000
+}
+code() { case $1 in
+    a) echo 04;; b) echo 05;; c) echo 06;; d) echo 07;; e) echo 08;; f) echo 09;;
+    g) echo 0a;; h) echo 0b;; i) echo 0c;; j) echo 0d;; k) echo 0e;; l) echo 0f;;
+    m) echo 10;; n) echo 11;; o) echo 12;; p) echo 13;; q) echo 14;; r) echo 15;;
+    s) echo 16;; t) echo 17;; u) echo 18;; v) echo 19;; w) echo 1a;; x) echo 1b;;
+    y) echo 1c;; z) echo 1d;; 1) echo 1e;; 2) echo 1f;; 3) echo 20;; 4) echo 21;;
+    5) echo 22;; 6) echo 23;; 7) echo 24;; 8) echo 25;; 9) echo 26;; 0) echo 27;;
+    \ ) echo 2c;; -) echo 2d;; =) echo 2e;; .) echo 37;; ,) echo 36;; /) echo 38;;
+esac; }
+if [ "$1" = "-k" ]; then
+    case $2 in
+      enter) tap 0 28;; tab) tap 0 2b;; esc) tap 0 29;; space) tap 0 2c;;
+      backspace) tap 0 2a;; up) tap 0 52;; down) tap 0 51;;
+      left) tap 0 50;; right) tap 0 4f;; home) tap 0 4a;; end) tap 0 4d;;
+    esac; exit 0
+fi
+text="$*"
+i=1; len=${#text}
+while [ $i -le $len ]; do
+    ch=$(printf "%s" "$text" | cut -c $i-$i)
+    case "$ch" in
+      " ") tap 0 2c;;
+      [A-Z]) tap 2 $(code $(echo "$ch" | tr A-Z a-z));;
+      *) k=$(code "$ch"); [ -n "$k" ] && tap 0 "$k";;
+    esac
+    i=$((i + 1))
+done
+EOF
+chmod +x "$TARGET/usr/local/bin/hidkey"
+
 # bluetoothd must start AFTER dbus (parallel start races -> daemon exits ->
 # OpenRC marks it crashed and it never comes back)
 mkdir -p "$TARGET/etc/conf.d"
@@ -245,6 +289,14 @@ echo 0x05c6 > $G/idVendor 2>/dev/null
 echo 0x9025 > $G/idProduct 2>/dev/null
 ln -sf $G/functions/acm.0 $G/configs/c.1/f1 2>/dev/null || true
 ln -sf $G/functions/ncm.0 $G/configs/c.1/f2 2>/dev/null || true
+# HID keyboard function: when a target phone hosts us (target = OTG adapter),
+# /dev/hidg0 + tools/hidkey let this device type into the target phone.
+mkdir -p $G/functions/hid.0 2>/dev/null && {
+    echo 1 > $G/functions/hid.0/protocol
+    echo 8 > $G/functions/hid.0/report_length
+    printf '\x05\x01\x09\x06\xa1\x01\x05\x07\x19\xe0\x29\xe7\x15\x00\x25\x01\x75\x01\x95\x08\x81\x02\x95\x01\x75\x08\x81\x01\x95\x05\x75\x01\x05\x08\x19\x01\x29\x05\x91\x02\x95\x01\x75\x03\x91\x01\x95\x06\x75\x08\x15\x00\x25\x65\x05\x07\x19\x00\x29\x65\x81\x00\xc0' > $G/functions/hid.0/report_desc
+    ln -sf $G/functions/hid.0 $G/configs/c.1/f3 2>/dev/null || true
+}
 n=0
 while [ $n -lt 20 ]; do
     UDC=$(ls /sys/class/udc 2>/dev/null | head -1)
