@@ -72,6 +72,8 @@ chroot "$TARGET" /sbin/apk add --no-cache \
     qmi-utils \
     modemmanager \
     modemmanager-openrc \
+    usbutils \
+    android-tools \
     ca-certificates
 
 # Clean up QEMU binary from target
@@ -155,6 +157,83 @@ while [ $i -le $len ]; do
 done
 EOF
 chmod +x "$TARGET/usr/local/bin/hidkey"
+ln -sf /usr/local/bin/hidkey "$TARGET/usr/bin/hidkey"
+
+# usb-mode: switch USB controller between host and gadget roles
+cat <<'EOF' > "$TARGET/usr/local/bin/usb-mode"
+#!/bin/sh
+ROLE_FILE="/sys/devices/platform/soc@0/78d9000.usb/ci_hdrc.0/role"
+GADGET_UDC="/sys/kernel/config/usb_gadget/m20t/UDC"
+
+status() {
+    echo "=== USB Controller Status ==="
+    if [ -f "$ROLE_FILE" ]; then
+        echo "Current Role: $(cat $ROLE_FILE)"
+    else
+        echo "Role file not found: $ROLE_FILE"
+    fi
+    if [ -d /sys/class/extcon/extcon0 ]; then
+        echo "Extcon (PM8909 usbin): $(cat /sys/class/extcon/extcon0/state 2>/dev/null | tr '\n' ' ')"
+    fi
+    echo ""
+    echo "=== USB Devices (lsusb) ==="
+    lsusb 2>/dev/null
+    echo ""
+    echo "=== USB Ports / Sysfs Devices ==="
+    for dev in /sys/bus/usb/devices/*; do
+        [ -e "$dev" ] || continue
+        echo -n "$(basename $dev): "
+        if [ -f "$dev/product" ]; then
+            echo "$(cat $dev/manufacturer 2>/dev/null) $(cat $dev/product 2>/dev/null) ($(cat $dev/idVendor 2>/dev/null):$(cat $dev/idProduct 2>/dev/null))"
+        else
+            echo "(bus/hub/interface)"
+        fi
+    done
+}
+
+set_host() {
+    echo "Switching USB controller to HOST mode..."
+    if [ -f "$GADGET_UDC" ]; then
+        echo "" > "$GADGET_UDC" 2>/dev/null
+    fi
+    if [ -f "$ROLE_FILE" ]; then
+        echo host > "$ROLE_FILE"
+        sleep 1
+    fi
+    status
+}
+
+set_gadget() {
+    echo "Switching USB controller to GADGET mode..."
+    if [ -f "$ROLE_FILE" ]; then
+        echo gadget > "$ROLE_FILE"
+        sleep 1
+    fi
+    if [ -f "$GADGET_UDC" ]; then
+        UDC=$(ls /sys/class/udc 2>/dev/null | head -1)
+        [ -n "$UDC" ] && echo "$UDC" > "$GADGET_UDC" 2>/dev/null
+    fi
+    status
+}
+
+case "$1" in
+    host)
+        set_host
+        ;;
+    gadget)
+        set_gadget
+        ;;
+    status|"")
+        status
+        ;;
+    *)
+        echo "Usage: $0 [host|gadget|status]"
+        exit 1
+        ;;
+esac
+EOF
+chmod +x "$TARGET/usr/local/bin/usb-mode"
+ln -sf /usr/local/bin/usb-mode "$TARGET/usr/bin/usb-mode"
 
 # bluetoothd must start AFTER dbus (parallel start races -> daemon exits ->
 # OpenRC marks it crashed and it never comes back)
