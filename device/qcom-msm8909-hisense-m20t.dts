@@ -136,8 +136,12 @@
 	status = "okay";
 };
 
+/* Dual-role USB: peripheral when plugged into a computer/charger (gadget:
+ * serial console + NCM network), host when an OTG adapter grounds the ID
+ * pin (USB tethering from a phone, USB storage). extcon on pm8909_usbin
+ * drives the role switch. */
 &usb {
-	dr_mode = "peripheral";
+	dr_mode = "otg";
 	extcon = <&pm8909_usbin>;
 	status = "okay";
 };
