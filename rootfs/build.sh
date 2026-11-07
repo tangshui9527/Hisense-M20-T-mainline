@@ -284,7 +284,8 @@ if [ -d $G1 ]; then
           $G1/functions/acm.usb0 $G1/strings/0x409 $G1/strings $G1 2>/dev/null
 fi
 G=/sys/kernel/config/usb_gadget/m20t
-mkdir -p $G/functions/acm.0 $G/functions/ncm.0 $G/configs/c.1 2>/dev/null || exit 0
+echo "" > $G/UDC 2>/dev/null
+mkdir -p $G/functions/acm.0 $G/functions/ncm.0 $G/functions/hid.0 $G/configs/c.1 2>/dev/null || exit 0
 echo 0x05c6 > $G/idVendor 2>/dev/null
 echo 0x9025 > $G/idProduct 2>/dev/null
 ln -sf $G/functions/acm.0 $G/configs/c.1/f1 2>/dev/null || true
@@ -294,7 +295,7 @@ ln -sf $G/functions/ncm.0 $G/configs/c.1/f2 2>/dev/null || true
 mkdir -p $G/functions/hid.0 2>/dev/null && {
     echo 1 > $G/functions/hid.0/protocol
     echo 8 > $G/functions/hid.0/report_length
-    printf '\x05\x01\x09\x06\xa1\x01\x05\x07\x19\xe0\x29\xe7\x15\x00\x25\x01\x75\x01\x95\x08\x81\x02\x95\x01\x75\x08\x81\x01\x95\x05\x75\x01\x05\x08\x19\x01\x29\x05\x91\x02\x95\x01\x75\x03\x91\x01\x95\x06\x75\x08\x15\x00\x25\x65\x05\x07\x19\x00\x29\x65\x81\x00\xc0' > $G/functions/hid.0/report_desc
+    printf '%s' '\005\001\011\006\241\001\005\007\031\340\051\347\025\000\045\001\165\001\225\010\201\002\225\001\165\010\201\001\225\005\165\001\005\010\031\001\051\005\221\002\225\001\165\003\221\001\225\006\165\010\025\000\045\145\005\007\031\000\051\145\201\000\300' > $G/functions/hid.0/report_desc
     ln -sf $G/functions/hid.0 $G/configs/c.1/f3 2>/dev/null || true
 }
 n=0
