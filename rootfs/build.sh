@@ -8,7 +8,8 @@ MINIROOTFS_VER="3.21.0"
 ARCH="armhf"
 ROOTFS_URL="https://dl-cdn.alpinelinux.org/alpine/${ALPINE_VER}/releases/${ARCH}/alpine-minirootfs-${MINIROOTFS_VER}-${ARCH}.tar.gz"
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(SRCDIR=$(cd "$(dirname "$0")/.." && pwd)
+cd "$(dirname "$0")" && pwd)"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -234,6 +235,22 @@ esac
 EOF
 chmod +x "$TARGET/usr/local/bin/usb-mode"
 ln -sf /usr/local/bin/usb-mode "$TARGET/usr/bin/usb-mode"
+
+# USB dual-role manager: 00:00-06:00 device(gadget), 06:00-24:00 host.
+# Mechanism: chipidea role switch (/sys/class/usb_role/.../role) — requires
+# CONFIG_USB_ROLE_SWITCH + the DT usb-role-switch property.
+mkdir -p "$TARGET/opt/usb-role-manager/state"
+cp -a /tmp/usbrole-kit/* "$TARGET/opt/usb-role-manager/" 2>/dev/null || \
+    cp -a "$SRCDIR/usb-role-manager/"* "$TARGET/opt/usb-role-manager/" 2>/dev/null || true
+chmod 755 "$TARGET/opt/usb-role-manager/"{usb-role,schedule-apply,schedule-check,install.sh,uninstall.sh} 2>/dev/null || true
+ln -sf /opt/usb-role-manager/usb-role "$TARGET/usr/local/bin/usb-role" 2>/dev/null || true
+cat >> "$TARGET/etc/crontabs/root" <<CRON
+0 0 * * * /opt/usb-role-manager/schedule-apply
+0 6 * * * /opt/usb-role-manager/schedule-apply
+*/5 * * * * /opt/usb-role-manager/schedule-check
+CRON
+printf '#!/bin/sh\n/opt/usb-role-manager/schedule-apply\n' > "$TARGET/etc/local.d/usb-role-boot.start"
+chmod +x "$TARGET/etc/local.d/usb-role-boot.start"
 
 # bluetoothd must start AFTER dbus (parallel start races -> daemon exits ->
 # OpenRC marks it crashed and it never comes back)
