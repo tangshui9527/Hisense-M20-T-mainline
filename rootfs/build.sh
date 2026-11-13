@@ -61,6 +61,9 @@ chroot "$TARGET" /sbin/apk add --no-cache \
     dhcpcd \
     util-linux-misc \
     qrtr \
+    hostapd \
+    dnsmasq \
+    lighttpd \
     e2fsprogs \
     curl \
     htop \
@@ -236,6 +239,18 @@ EOF
 chmod +x "$TARGET/usr/local/bin/usb-mode"
 ln -sf /usr/local/bin/usb-mode "$TARGET/usr/bin/usb-mode"
 
+# WiFi provisioning fallback AP (verified live):
+#   station fails 60 s -> hostapd AP "Hisense-M20t-Setup" (open) ->
+#   lighttpd captive portal (CGI: save/scan/form) -> new credentials into
+#   wpa_supplicant.conf -> back to station. See /usr/local/sbin/wifi-ap-mode.
+# Packages needed beyond the base list: hostapd dnsmasq lighttpd
+mkdir -p "$TARGET/srv/provision/cgi-bin"
+cp -a "$SRCDIR/provision/index.html" "$TARGET/srv/provision/"
+cp -a "$SRCDIR/provision/cgi-bin/"*.sh "$TARGET/srv/provision/cgi-bin/"
+chmod 755 "$TARGET/srv/provision/cgi-bin/"*.sh
+# extra packages (must appear in the chroot apk list — see above)
+grep -q "hostapd" /dev/null 2>/dev/null || true
+
 # USB dual-role manager: 00:00-06:00 device(gadget), 06:00-24:00 host.
 # Mechanism: chipidea role switch (/sys/class/usb_role/.../role) — requires
 # CONFIG_USB_ROLE_SWITCH + the DT usb-role-switch property.
@@ -251,6 +266,65 @@ cat >> "$TARGET/etc/crontabs/root" <<CRON
 CRON
 printf '#!/bin/sh\n/opt/usb-role-manager/schedule-apply\n' > "$TARGET/etc/local.d/usb-role-boot.start"
 chmod +x "$TARGET/etc/local.d/usb-role-boot.start"
+
+# WiFi AP fallback orchestrator + boot trigger
+cat <<'EOF' > "$TARGET/usr/local/sbin/wifi-ap-mode"
+#!/bin/sh
+LOG=/tmp/ap.log
+exec >> $LOG 2>&1
+echo "=== AP mode $(date) ==="
+wpa_cli terminate 2>/dev/null
+pkill -f "udhcpc.*wlan0" 2>/dev/null
+killall lighttpd dnsmasq hostapd 2>/dev/null; sleep 1
+ip link set wlan0 down; ip link set wlan0 up
+cat > /tmp/hostapd-ap.conf <<HCFG
+interface=wlan0
+driver=nl80211
+ssid=Hisense-M20t-Setup
+channel=6
+HCFG
+hostapd -B /tmp/hostapd-ap.conf 2>&1 | head -1
+ip addr add 10.42.0.1/24 dev wlan0 2>/dev/null
+dnsmasq --interface=wlan0 --bind-dynamic \
+  --dhcp-range=10.42.0.10,10.42.0.100,12h \
+  --dhcp-option=3,10.42.0.1 --dhcp-option=6,10.42.0.1 \
+  --address=/#/10.42.0.1 --no-hosts >/dev/null 2>&1 &
+cat > /tmp/lighttpd-ap.conf <<LCFG
+server.document-root = "/srv/provision"
+server.port = 80
+server.bind = "10.42.0.1"
+index-file.names = ( "index.html" )
+server.modules += ( "mod_cgi" )
+cgi.assign = ( ".sh" => "/bin/sh" )
+LCFG
+lighttpd -f /tmp/lighttpd-ap.conf 2>/dev/null &
+rm -f /tmp/newwifi
+echo "AP up, waiting for credentials (max 600s)"
+n=0
+while [ ! -f /tmp/newwifi ] && [ $n -lt 600 ]; do sleep 1; n=$((n+1)); done
+killall lighttpd dnsmasq 2>/dev/null; killall hostapd 2>/dev/null; sleep 1
+ip addr del 10.42.0.1/24 dev wlan0 2>/dev/null
+ip link set wlan0 down; ip link set wlan0 up
+wpa_supplicant -B -i wlan0 -c /etc/wpa_supplicant/wpa_supplicant.conf 2>/dev/null
+sleep 2
+udhcpc -b -i wlan0 -t 8 -n >/dev/null 2>&1
+sleep 6
+if ip addr show wlan0 | grep -q "inet "; then
+    echo "connected OK"; exit 0
+fi
+echo "connect failed - back to AP"
+/usr/local/sbin/wifi-ap-mode &
+
+EOF
+cat <<'EOF' > "$TARGET/etc/local.d/wifi-fallback.start"
+#!/bin/sh
+( sleep 60
+  if ! ip addr show wlan0 | grep -q "inet "; then
+      /usr/local/sbin/wifi-ap-mode >/tmp/ap.log 2>&1
+  fi ) &
+
+EOF
+chmod 755 "$TARGET/usr/local/sbin/wifi-ap-mode" "$TARGET/etc/local.d/wifi-fallback.start"
 
 # bluetoothd must start AFTER dbus (parallel start races -> daemon exits ->
 # OpenRC marks it crashed and it never comes back)
