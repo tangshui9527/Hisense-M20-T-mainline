@@ -142,6 +142,7 @@
  * drives the role switch. */
 &usb {
 	dr_mode = "otg";
+	usb-role-switch;
 	extcon = <&pm8909_usbin>;
 	status = "okay";
 };
