@@ -301,7 +301,7 @@ lighttpd -f /tmp/lighttpd-ap.conf 2>/dev/null &
 rm -f /tmp/newwifi
 echo "AP up, waiting for credentials (max 600s)"
 n=0
-while [ ! -f /tmp/newwifi ] && [ $n -lt 600 ]; do sleep 1; n=$((n+1)); done
+while [ ! -f /tmp/newwifi ] && [ $n -lt 300 ]; do sleep 1; n=$((n+1)); done
 killall lighttpd dnsmasq 2>/dev/null; killall hostapd 2>/dev/null; sleep 1
 ip addr del 10.42.0.1/24 dev wlan0 2>/dev/null
 ip link set wlan0 down; ip link set wlan0 up
