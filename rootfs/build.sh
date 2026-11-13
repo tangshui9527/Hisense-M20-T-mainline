@@ -332,6 +332,30 @@ cat <<'EOF' > "$TARGET/etc/local.d/wifi-fallback.start"
 EOF
 chmod 755 "$TARGET/usr/local/sbin/wifi-ap-mode" "$TARGET/etc/local.d/wifi-fallback.start"
 
+# IP reporter: sends LAN/Tailscale/WAN/IPv6 to WeChat via ServerChan (sct.ftqq.com)
+# after boot. The SendKey lives in /etc/report-ip.key (NOT in this repo — it is a
+# per-user secret; create it manually: echo SCTxxxx > /etc/report-ip.key).
+# Free tier ~5 messages/day; one message per boot fits the quota.
+cat <<'EOF' > "$TARGET/usr/local/sbin/report-ip"
+#!/bin/sh
+KEYFILE=/etc/report-ip.key
+[ -f $KEYFILE ] || exit 1
+KEY=$(cat $KEYFILE | tr -d " \n")
+LAN=$(ip -4 addr show wlan0 2>/dev/null | grep -o "inet [0-9.]*" | awk "{print \$2}")
+TS=$(ip -4 addr show tailscale0 2>/dev/null | grep -o "inet [0-9.]*" | awk "{print \$2}")
+EXT=$(curl -s --max-time 8 https://api.ipify.org 2>/dev/null)
+V6=$(ip -6 addr show scope global 2>/dev/null | grep -o "inet6 [0-9a-f:]*" | head -1 | awk "{print \$2}")
+BODY="内网: ${LAN:-无}\nTailscale: ${TS:-无}\n外网: ${EXT:-获取失败}\nIPv6: ${V6:-无}\n主机: $(hostname)\n时间: $(date)"
+curl -s --max-time 15 "https://sctapi.ftqq.com/$(cat $KEYFILE).send" \
+  --data-urlencode "title=M20T 上线" --data-urlencode "desp=$BODY"
+EOF
+chmod 755 "$TARGET/usr/local/sbin/report-ip"
+cat <<'EOF' > "$TARGET/etc/local.d/report-ip.start"
+#!/bin/sh
+(sleep 10; /usr/local/sbin/report-ip >> /root/report-ip.log 2>&1) &
+EOF
+chmod 755 "$TARGET/etc/local.d/report-ip.start"
+
 # bluetoothd must start AFTER dbus (parallel start races -> daemon exits ->
 # OpenRC marks it crashed and it never comes back)
 mkdir -p "$TARGET/etc/conf.d"
