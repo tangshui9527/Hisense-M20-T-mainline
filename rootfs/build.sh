@@ -270,6 +270,12 @@ chmod +x "$TARGET/etc/local.d/usb-role-boot.start"
 # WiFi AP fallback orchestrator + boot trigger
 cat <<'EOF' > "$TARGET/usr/local/sbin/wifi-ap-mode"
 #!/bin/sh
+if [ -f /run/wifi-ap-mode.pid ] && kill -0 $(cat /run/wifi-ap-mode.pid 2>/dev/null) 2>/dev/null; then
+    echo "already running, exit"
+    exit 0
+fi
+echo $$ > /run/wifi-ap-mode.pid
+trap "rm -f /run/wifi-ap-mode.pid" EXIT
 LOG=/tmp/ap.log
 exec >> $LOG 2>&1
 echo "=== AP mode $(date) ==="
