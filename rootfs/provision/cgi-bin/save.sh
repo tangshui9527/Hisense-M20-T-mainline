@@ -1,5 +1,5 @@
 #!/bin/sh
-urldecode() { : "${1//+/ }"; printf "%b" "${_//%/\\x}"; }
+urldecode() { local s=$1; s=${s//+/ }; printf "%b" "${s//%/\x}"; }
 len=${CONTENT_LENGTH:-999}
 body=$(head -c $len)
 ssid=$(urldecode "$(echo "$body" | sed -n 's/^.*ssid=\([^&]*\).*$/\1/p')")
