@@ -627,7 +627,7 @@
 			reg = <0x4ab000 0x04>;
 		};
 
-		pinctrl@1000000 {
+		tlmm: pinctrl@1000000 {
 			compatible = "qcom,msm8909-tlmm";
 			reg = <0x1000000 0x300000>;
 			interrupts = <0x00 0xd0 0x04>;
@@ -1017,7 +1017,8 @@
 						interrupts = <0x00 0x08 0x01 0x03>;
 						debounce = <0x3d09>;
 						bias-pull-up;
-						status = "disabled";
+						status = "okay";
+					linux,code = <0x72>;
 					};
 
 					watchdog {
@@ -1836,22 +1837,19 @@
 
 /* Volume-up key: GPIO 90 (from the stock dtb17 gpio_keys/vol_up node,
  * active-low, KEY_VOLUMEUP). The power key on this unit is broken. */
-gpio-keys {
-	compatible = "gpio-keys";
-	label = "volume_up";
-
-	vol_up {
+/* rootdef after the root node needs the leading '/' (dtc grammar) */
+/ {
+	gpio-keys {
+		compatible = "gpio-keys";
 		label = "volume_up";
-		gpios = <&tlmm 90 1>;
-		linux,input-type = <1>;
-		linux,code = <115>;
-		debounce-interval = <15>;
+
+		vol_up {
+			label = "volume_up";
+			gpios = <&tlmm 90 1>;
+			linux,input-type = <1>;
+			linux,code = <115>;
+			debounce-interval = <15>;
+		};
 	};
 };
 
-/* Volume-down key = PMIC RESIN input (KEY_VOLUMEDOWN), disabled in the base
- * dtsi — enable with an explicit key code. */
-&pm8909_resin {
-	status = "okay";
-	linux,code = <114>;
-};
