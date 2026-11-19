@@ -1848,3 +1848,10 @@ gpio-keys {
 		debounce-interval = <15>;
 	};
 };
+
+/* Volume-down key = PMIC RESIN input (KEY_VOLUMEDOWN), disabled in the base
+ * dtsi — enable with an explicit key code. */
+&pm8909_resin {
+	status = "okay";
+	linux,code = <114>;
+};
