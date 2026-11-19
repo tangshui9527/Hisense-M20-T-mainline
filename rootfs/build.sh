@@ -8,8 +8,8 @@ MINIROOTFS_VER="3.21.0"
 ARCH="armhf"
 ROOTFS_URL="https://dl-cdn.alpinelinux.org/alpine/${ALPINE_VER}/releases/${ARCH}/alpine-minirootfs-${MINIROOTFS_VER}-${ARCH}.tar.gz"
 
-SCRIPT_DIR="$(SRCDIR=$(cd "$(dirname "$0")/.." && pwd)
-cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SRCDIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
