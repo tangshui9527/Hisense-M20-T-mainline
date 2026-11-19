@@ -268,6 +268,7 @@ printf '#!/bin/sh\n/opt/usb-role-manager/schedule-apply\n' > "$TARGET/etc/local.
 chmod +x "$TARGET/etc/local.d/usb-role-boot.start"
 
 # WiFi AP fallback orchestrator + boot trigger
+mkdir -p "$TARGET/usr/local/sbin" "$TARGET/usr/local/bin"
 cat <<'EOF' > "$TARGET/usr/local/sbin/wifi-ap-mode"
 #!/bin/sh
 if [ -f /run/wifi-ap-mode.pid ] && kill -0 $(cat /run/wifi-ap-mode.pid 2>/dev/null) 2>/dev/null; then
