@@ -245,8 +245,8 @@ ln -sf /usr/local/bin/usb-mode "$TARGET/usr/bin/usb-mode"
 #   wpa_supplicant.conf -> back to station. See /usr/local/sbin/wifi-ap-mode.
 # Packages needed beyond the base list: hostapd dnsmasq lighttpd
 mkdir -p "$TARGET/srv/provision/cgi-bin"
-cp -a "$SRCDIR/provision/index.html" "$TARGET/srv/provision/"
-cp -a "$SRCDIR/provision/cgi-bin/"*.sh "$TARGET/srv/provision/cgi-bin/"
+cp -a "$SRCDIR/rootfs/provision/index.html" "$TARGET/srv/provision/"
+cp -a "$SRCDIR/rootfs/provision/cgi-bin/"*.sh "$TARGET/srv/provision/cgi-bin/"
 chmod 755 "$TARGET/srv/provision/cgi-bin/"*.sh
 # extra packages (must appear in the chroot apk list — see above)
 grep -q "hostapd" /dev/null 2>/dev/null || true
@@ -256,7 +256,7 @@ grep -q "hostapd" /dev/null 2>/dev/null || true
 # CONFIG_USB_ROLE_SWITCH + the DT usb-role-switch property.
 mkdir -p "$TARGET/opt/usb-role-manager/state"
 cp -a /tmp/usbrole-kit/* "$TARGET/opt/usb-role-manager/" 2>/dev/null || \
-    cp -a "$SRCDIR/usb-role-manager/"* "$TARGET/opt/usb-role-manager/" 2>/dev/null || true
+    cp -a "$SRCDIR/rootfs/usb-role-manager/"* "$TARGET/opt/usb-role-manager/" 2>/dev/null || true
 chmod 755 "$TARGET/opt/usb-role-manager/"{usb-role,schedule-apply,schedule-check,install.sh,uninstall.sh} 2>/dev/null || true
 ln -sf /opt/usb-role-manager/usb-role "$TARGET/usr/local/bin/usb-role" 2>/dev/null || true
 cat >> "$TARGET/etc/crontabs/root" <<CRON
