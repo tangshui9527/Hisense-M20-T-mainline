@@ -356,6 +356,33 @@ cat <<'EOF' > "$TARGET/etc/local.d/report-ip.start"
 EOF
 chmod 755 "$TARGET/etc/local.d/report-ip.start"
 
+# Power-key double-press -> show IP on screen (no touch driver in mainline)
+cat <<'EOF' > "$TARGET/usr/local/bin/pwrkey-2tap"
+#!/bin/sh
+EV=/dev/input/event0
+t1=0
+while true; do
+  ev=$(dd if=$EV bs=16 count=1 2>/dev/null | od -An -tx1 | tr -d " \n")
+  [ -z "$ev" ] && continue
+  t=${ev:16:4}; c=${ev:20:4}; v=${ev:24:2}
+  if [ "$t" = "0100" ] && [ "$c" = "7400" ] && [ "$v" = "01" ]; then
+    now=$(date +%s)
+    if [ $t1 -gt 0 ] && [ $((now - t1)) -le 2 ]; then
+      /usr/local/bin/show-ip
+      t1=0
+    else
+      t1=$now
+    fi
+  fi
+done
+EOF
+chmod 755 "$TARGET/usr/local/bin/pwrkey-2tap"
+cat <<'EOF' > "$TARGET/etc/local.d/pwrkey2tap.start"
+#!/bin/sh
+/usr/local/bin/pwrkey-2tap >/dev/null 2>&1 &
+EOF
+chmod 755 "$TARGET/etc/local.d/pwrkey2tap.start"
+
 # bluetoothd must start AFTER dbus (parallel start races -> daemon exits ->
 # OpenRC marks it crashed and it never comes back)
 mkdir -p "$TARGET/etc/conf.d"
