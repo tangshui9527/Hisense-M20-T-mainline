@@ -378,11 +378,12 @@ while true; do
 done
 EOF
 chmod 755 "$TARGET/usr/local/bin/pwrkey-2tap"
-cat <<'EOF' > "$TARGET/etc/local.d/pwrkey2tap.start"
+cat <<'EOF' > "$TARGET/etc/local.d/keywatch.start"
 #!/bin/sh
-/usr/local/bin/pwrkey-2tap >/dev/null 2>&1 &
+[ -c /dev/input/event2 ] && /usr/local/bin/keywatch /dev/input/event2 115 >/dev/null 2>&1 &
+[ -c /dev/input/event1 ] && /usr/local/bin/keywatch /dev/input/event1 114 >/dev/null 2>&1 &
 EOF
-chmod 755 "$TARGET/etc/local.d/pwrkey2tap.start"
+chmod 755 "$TARGET/etc/local.d/keywatch.start"
 
 # bluetoothd must start AFTER dbus (parallel start races -> daemon exits ->
 # OpenRC marks it crashed and it never comes back)
