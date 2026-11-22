@@ -353,7 +353,26 @@ EOF
 chmod 755 "$TARGET/usr/local/sbin/report-ip"
 cat <<'EOF' > "$TARGET/etc/local.d/report-ip.start"
 #!/bin/sh
-(sleep 10; /usr/local/sbin/report-ip >> /root/report-ip.log 2>&1) &
+# report-ip.start — 等网络就绪 + 时钟正常后发送 IP 到微信（Server酱）
+# 旧版固定开机+10秒发送：冷启动时时钟还是1970（TLS校验必败）且WiFi未就绪，
+# 实测全部空响应（见 /root/report-ip.log）。改为轮询等待，最多150秒。
+(
+	i=0
+	while [ $i -lt 75 ]; do
+		HASIP=$(ip -4 addr show wlan0 2>/dev/null | grep -c "inet ")
+		YEAR=$(date +%Y 2>/dev/null)
+		if [ "${HASIP:-0}" -ge 1 ] 2>/dev/null && [ "${YEAR:-0}" -ge 2025 ] 2>/dev/null; then
+			# 时钟和网络都就绪，再稳 3 秒让 DNS 生效
+			sleep 3
+			/usr/local/sbin/report-ip
+			exit 0
+		fi
+		sleep 2
+		i=$((i+1))
+	done
+	# 150秒仍未就绪：照发一次（记录失败现场）
+	/usr/local/sbin/report-ip
+) &
 EOF
 chmod 755 "$TARGET/etc/local.d/report-ip.start"
 
