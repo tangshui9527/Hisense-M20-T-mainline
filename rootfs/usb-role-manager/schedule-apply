@@ -6,23 +6,36 @@ mkdir -p $STATE
 exec 9>$LOCK
 flock 9
 RS=/sys/class/usb_role/ci_hdrc.0-role-switch/role
+GADGET_UDC="/sys/kernel/config/usb_gadget/m20t/UDC"
 [ -w $RS ] || { echo "role switch unavailable" >> $BASE/state/schedule.log; exit 1; }
 h=$(date +%H)
 [ $h -ge 6 ] && [ $h -lt 24 ] && want=host || want=device
 cur=$(cat $RS 2>/dev/null)
 rm -f $STATE/mode $STATE/expires
 if [ "$cur" = "$want" ]; then
-    echo "$(date '+%F %T') schedule: already $want" >> $STATE/schedule.log
+    # 确保当前角色下 UDC 状态正确
+    if [ "$want" = "host" ] && [ -n "$(cat $GADGET_UDC 2>/dev/null)" ]; then
+        echo "" > "$GADGET_UDC" 2>/dev/null
+    fi
+    echo "$(date "+%F %T") schedule: already $want" >> $STATE/schedule.log
     exit 0
+fi
+
+if [ "$want" = "host" ]; then
+    echo "" > "$GADGET_UDC" 2>/dev/null
 fi
 echo $want > $RS
 sleep 2
 ok=$(cat $RS 2>/dev/null)
 if [ "$ok" = "$want" ]; then
+    if [ "$want" = "device" ]; then
+        UDC=$(ls /sys/class/udc 2>/dev/null | head -1)
+        [ -n "$UDC" ] && echo "$UDC" > "$GADGET_UDC" 2>/dev/null
+    fi
     date +%H:%M > $STATE/last_switch_time
     echo "OK" > $STATE/last_result
-    echo "$(date '+%F %T') schedule: switched to $want" >> $STATE/schedule.log
+    echo "$(date "+%F %T") schedule: switched to $want" >> $STATE/schedule.log
 else
     echo "FAIL" > $STATE/last_result
-    echo "$(date '+%F %T') schedule: switch to $want FAILED (got $ok)" >> $STATE/schedule.log
+    echo "$(date "+%F %T") schedule: switch to $want FAILED (got $ok)" >> $STATE/schedule.log
 fi

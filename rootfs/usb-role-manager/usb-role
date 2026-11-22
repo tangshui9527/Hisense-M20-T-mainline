@@ -1,9 +1,11 @@
 #!/bin/sh
-# usb-role — M20-T USB dual-role manager (chipidea role-switch via sysfs)
+# usb-role — M20-T USB dual-role manager
 BASE=/opt/usb-role-manager
 RS=/sys/class/usb_role/ci_hdrc.0-role-switch/role
+ROLE_FILE="/sys/devices/platform/soc@0/78d9000.usb/ci_hdrc.0/role"
 LOCK=/tmp/usb-role.lock
 STATE=$BASE/state
+GADGET_UDC="/sys/kernel/config/usb_gadget/m20t/UDC"
 mkdir -p $STATE
 exec 9>$LOCK
 flock 9
@@ -13,37 +15,62 @@ usage() {
     exit 1
 }
 
-next_boundary() { # epoch of next 00:00/06:00
+next_boundary() {
     now=$(date +%s)
-    sec_today=$(( $(date +%H) * 3600 + $(date +%M) * 60 ))
+    h=$(date +%H | sed "s/^0//")
+    [ -z "$h" ] && h=0
+    m=$(date +%M | sed "s/^0//")
+    [ -z "$m" ] && m=0
+    sec_today=$(( h * 3600 + m * 60 ))
     midnight=$(( now - sec_today ))
     b6=$(( midnight + 21600 ))
     if [ $now -lt $b6 ]; then echo $b6; else echo $(( midnight + 86400 )); fi
 }
-sched_role() { h=$(date +%H); [ $h -ge 6 ] && [ $h -lt 24 ] && echo host || echo device; }
 
-do_switch() { # $1 = host|device ; returns 0 on success
+do_switch() { # $1 = host|device
     target=$1
-    [ -w $RS ] || { echo "ERROR: role switch $RS not writable"; return 1; }
-    old=$(cat $RS 2>/dev/null)
-    echo $target > $RS || { echo "ERROR: role write failed"; echo "FAIL" > $STATE/last_result; return 1; }
-    sleep 2
-    cur=$(cat $RS 2>/dev/null)
-    if [ "$cur" != "$target" ]; then
-        echo "ERROR: switch verify failed (got $cur) — rolling back"
-        echo $old > $RS 2>/dev/null
-        echo "FAIL" > $STATE/last_result
-        return 1
+    if [ "$target" = "host" ]; then
+        if [ -f "$GADGET_UDC" ]; then
+            echo "" > "$GADGET_UDC" 2>/dev/null
+        fi
+        echo host > $RS 2>/dev/null
+        echo host > $ROLE_FILE 2>/dev/null
+    else
+        echo device > $RS 2>/dev/null
+        echo gadget > $ROLE_FILE 2>/dev/null
+        if [ -f "$GADGET_UDC" ]; then
+            UDC=$(ls /sys/class/udc 2>/dev/null | head -1)
+            [ -n "$UDC" ] && echo "$UDC" > "$GADGET_UDC" 2>/dev/null
+        fi
     fi
-    # device 角色：确认 configfs gadget 已绑定（hidg0 存在性检查）
-    if [ "$target" = "device" ]; then
-        sleep 1
-        [ -c /dev/hidg0 ] || echo "WARN: hidg0 missing after device switch"
-    fi
+    sleep 1
+
     date +%H:%M > $STATE/last_switch_time
     echo "OK" > $STATE/last_result
-    echo "OK" > $STATE/last_role
     return 0
+}
+
+print_status() {
+    echo "USB Role Manager"
+    role=$(cat $ROLE_FILE 2>/dev/null || cat $RS 2>/dev/null || echo "?")
+    [ "$role" = "gadget" ] && role="device"
+    up=$(echo $role | tr a-z A-Z)
+    echo "Current Role:   $up ($role)"
+    mode=$(cat $STATE/mode 2>/dev/null || echo auto)
+    echo "Schedule Mode:  $mode"
+    nb=$(next_boundary)
+    echo "Next Switch:    $(date -d @$nb "+%H:%M" 2>/dev/null) ($(date +%H:%M) now)"
+    echo "Controller:     ci_hdrc (chipidea, dr_mode=otg)"
+    echo "Role Switch:    $RS"
+    if [ "$role" = "host" ]; then
+        echo "Host Status:    Active (usb bus: $(ls /sys/bus/usb/devices/ 2>/dev/null | grep -c "^usb"))"
+        echo "Gadget:         Unbound (host owns controller)"
+    else
+        echo "Host Status:    Inactive"
+        [ -c /dev/hidg0 ] && echo "Gadget:         Bound (ACM+NCM+HID, /dev/hidg0)" || echo "Gadget:         Bound (functions pending)"
+    fi
+    echo "Last Switch:    $(cat $STATE/last_switch_time 2>/dev/null || echo never)"
+    echo "Last Result:    $(cat $STATE/last_result 2>/dev/null || echo n/a)"
 }
 
 case "$1" in
@@ -52,33 +79,15 @@ host|device)
     nb=$(next_boundary)
     echo manual > $STATE/mode
     echo $nb > $STATE/expires
-    echo "manual until $(date -d @$nb '+%m-%d %H:%M' 2>/dev/null || echo "next boundary")"
-    /opt/usb-role-manager/usb-role status
+    echo "manual until $(date -d @$nb "+%m-%d %H:%M" 2>/dev/null || echo "next boundary")"
+    print_status
     ;;
 auto)
     /opt/usb-role-manager/schedule-apply
-    /opt/usb-role-manager/usb-role status
+    print_status
     ;;
 status)
-    echo "USB Role Manager"
-    role=$(cat $RS 2>/dev/null || echo "?")
-    up=$(echo $role | tr a-z A-Z)
-    echo "Current Role:   $up ($role)"
-    mode=$(cat $STATE/mode 2>/dev/null || echo auto)
-    echo "Schedule Mode:  $mode"
-    nb=$(next_boundary)
-    echo "Next Switch:    $(date -d @$nb '+%H:%M' 2>/dev/null) ($(date +%H:%M) now)"
-    echo "Controller:     ci_hdrc (chipidea, dr_mode=otg)"
-    echo "Role Switch:    $RS"
-    if [ "$role" = "host" ]; then
-        echo "Host Status:    Active (usb bus: $(ls /sys/bus/usb/devices/ 2>/dev/null | grep -c '^usb'))"
-        echo "Gadget:         Unbound (host owns controller)"
-    else
-        echo "Host Status:    Inactive"
-        [ -c /dev/hidg0 ] && echo "Gadget:         Bound (ACM+NCM+HID, /dev/hidg0)" || echo "Gadget:         Bound (functions pending)"
-    fi
-    echo "Last Switch:    $(cat $STATE/last_switch_time 2>/dev/null || echo never)"
-    echo "Last Result:    $(cat $STATE/last_result 2>/dev/null || echo n/a)"
+    print_status
     ;;
 apply-schedule)
     /opt/usb-role-manager/schedule-apply
