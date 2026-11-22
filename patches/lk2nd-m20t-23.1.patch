@@ -1258,7 +1258,7 @@ index 630d5387..7b7828bd 100644
 +# Hisense M20-T boot control (Android default target, fastboot fallback)
 +MODULES += lk2nd/m20t
 diff --git a/target/msm8909/target_display.c b/target/msm8909/target_display.c
-index 0d447010..7a5d843c 100644
+index 0d447010..8666cc9f 100644
 --- a/target/msm8909/target_display.c
 +++ b/target/msm8909/target_display.c
 @@ -78,6 +78,15 @@ static struct gpio_pin spi_bkl_gpio = {
@@ -1277,15 +1277,10 @@ index 0d447010..7a5d843c 100644
  static bool display_efuse = false;
  
  static void mdss_dsi_uniphy_pll_sw_reset_8909(uint32_t pll_base)
-@@ -220,11 +229,17 @@ int target_backlight_ctrl(struct backlight *bl, uint8_t enable)
+@@ -220,11 +229,25 @@ int target_backlight_ctrl(struct backlight *bl, uint8_t enable)
  	if (bl->bl_interface_type == BL_DCS)
  		return 0;
  
--	if (!(((HW_PLATFORM_SUBTYPE_8909_PM660 == platform_subtype) ||
--		(HW_PLATFORM_SUBTYPE_8909_PM660_V1 == platform_subtype) ||
--		(HW_PLATFORM_SUBTYPE_8909_COMPAL_ALPHA == platform_subtype)) &&
--		((MSM8909W == platform) || (APQ8009W == platform)) &&
--		(HW_PLATFORM_MTP == hw_id))) {
 +#if WITH_LK2ND_M20T
 +	/*
 +	 * The M20-T routes its backlight PWM through PMIC GPIO2 (stock DT:
@@ -1296,11 +1291,20 @@ index 0d447010..7a5d843c 100644
 +	(void)platform_subtype;
 +	(void)platform;
 +	(void)hw_id;
-+	if (0) {
++	if (0)
++#else
+ 	if (!(((HW_PLATFORM_SUBTYPE_8909_PM660 == platform_subtype) ||
+ 		(HW_PLATFORM_SUBTYPE_8909_PM660_V1 == platform_subtype) ||
+ 		(HW_PLATFORM_SUBTYPE_8909_COMPAL_ALPHA == platform_subtype)) &&
+ 		((MSM8909W == platform) || (APQ8009W == platform)) &&
+-		(HW_PLATFORM_MTP == hw_id))) {
++		(HW_PLATFORM_MTP == hw_id)))
++#endif
++	{
  		struct pm8x41_mpp mpp;
  		struct board_pmic_data pmic_info;
  		int rc;
-@@ -356,6 +371,17 @@ int target_panel_reset(uint8_t enable, struct panel_reset_sequence *resetseq,
+@@ -356,6 +379,17 @@ int target_panel_reset(uint8_t enable, struct panel_reset_sequence *resetseq,
  			gpio_set(enable_gpio.pin_id, 2);
  		}
  
