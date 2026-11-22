@@ -1,5 +1,5 @@
 diff --git a/app/aboot/aboot.c b/app/aboot/aboot.c
-index b44a5c26..69d951fd 100644
+index b44a5c26..2b0161b0 100644
 --- a/app/aboot/aboot.c
 +++ b/app/aboot/aboot.c
 @@ -105,6 +105,9 @@
@@ -12,19 +12,7 @@ index b44a5c26..69d951fd 100644
  
  extern  bool target_use_signed_kernel(void);
  extern void platform_uninit(void);
-@@ -3469,6 +3472,11 @@ void cmd_boot(const char *arg, void *data, unsigned sz)
- 	thread_sleep(LK2ND_FASTBOOT_DELAY);
- 	#endif
- 
-+#if WITH_LK2ND_M20T
-+	/* "fastboot boot" is a Linux boot: let it count as a failed attempt if it hangs. */
-+	m20t_count_attempt();
-+#endif
-+
- 	boot_linux((void*) hdr->kernel_addr, (void*) hdr->tags_addr,
- 		   (const char*) hdr->cmdline, board_machtype(),
- 		   (void*) hdr->ramdisk_addr, hdr->ramdisk_size,
-@@ -3976,6 +3984,10 @@ void cmd_flash_mmc_img(const char *arg, void *data, unsigned sz)
+@@ -3976,6 +3979,10 @@ void cmd_flash_mmc_img(const char *arg, void *data, unsigned sz)
  			}
  		}
  	}
@@ -35,7 +23,7 @@ index b44a5c26..69d951fd 100644
  	fastboot_okay("");
  	return;
  }
-@@ -4337,6 +4349,12 @@ void cmd_flash_mmc_sparse_img(const char *arg, void *data, unsigned sz)
+@@ -4337,6 +4344,12 @@ void cmd_flash_mmc_sparse_img(const char *arg, void *data, unsigned sz)
  		fastboot_fail("sparse image write failure");
  	}
  
@@ -48,7 +36,7 @@ index b44a5c26..69d951fd 100644
  	fastboot_okay("");
  	return;
  }
-@@ -4660,8 +4678,18 @@ void cmd_flash(const char *arg, void *data, unsigned sz)
+@@ -4660,8 +4673,18 @@ void cmd_flash(const char *arg, void *data, unsigned sz)
  
  void cmd_continue(const char *arg, void *data, unsigned sz)
  {
@@ -69,19 +57,25 @@ index b44a5c26..69d951fd 100644
  
  	if (target_is_emmc_boot())
  	{
-@@ -4672,6 +4700,11 @@ void cmd_continue(const char *arg, void *data, unsigned sz)
- #if WITH_LK2ND_BOOT
- 		if (!boot_into_recovery)
- 			lk2nd_boot();
-+#endif
-+#if WITH_LK2ND_M20T
-+		/* A Linux boot started on purpose still counts against the retry limit. */
-+		if (!boot_into_recovery)
-+			m20t_count_attempt();
+@@ -5497,6 +5520,17 @@ void aboot_init(const struct app_descriptor *app)
+ 	msm_wdog_init();
  #endif
- 		boot_linux_from_mmc();
- 	}
-@@ -5652,6 +5685,18 @@ void aboot_init(const struct app_descriptor *app)
+ 
++#if WITH_LK2ND_M20T
++	/*
++	 * Count the Linux attempt IMMEDIATELY - before display init and any
++	 * other code that could crash-loop without ever reaching m20t_preboot().
++	 * The initramfs clears the counter once userspace is reachable, so a
++	 * crash here is what actually increments toward the fastboot fallback.
++	 */
++	if (!boot_into_recovery)
++		m20t_count_attempt();
++#endif
++
+ 	/* Setup page size information for nv storage */
+ 	if (target_is_emmc_boot())
+ 	{
+@@ -5652,6 +5686,18 @@ void aboot_init(const struct app_descriptor *app)
  normal_boot:
  	if (!boot_into_fastboot)
  	{
@@ -100,7 +94,7 @@ index b44a5c26..69d951fd 100644
  #if WITH_LK2ND_BOOT
  		if (!boot_into_recovery)
  			lk2nd_boot();
-@@ -5723,6 +5768,10 @@ retry_boot:
+@@ -5723,6 +5769,10 @@ retry_boot:
  
  fastboot:
  	/* We are here means regular boot did not happen. Start fastboot. */
@@ -1264,7 +1258,7 @@ index 630d5387..7b7828bd 100644
 +# Hisense M20-T boot control (Android default target, fastboot fallback)
 +MODULES += lk2nd/m20t
 diff --git a/target/msm8909/target_display.c b/target/msm8909/target_display.c
-index 0d447010..7c32171d 100644
+index 0d447010..7a5d843c 100644
 --- a/target/msm8909/target_display.c
 +++ b/target/msm8909/target_display.c
 @@ -78,6 +78,15 @@ static struct gpio_pin spi_bkl_gpio = {
@@ -1283,7 +1277,30 @@ index 0d447010..7c32171d 100644
  static bool display_efuse = false;
  
  static void mdss_dsi_uniphy_pll_sw_reset_8909(uint32_t pll_base)
-@@ -356,6 +365,17 @@ int target_panel_reset(uint8_t enable, struct panel_reset_sequence *resetseq,
+@@ -220,11 +229,17 @@ int target_backlight_ctrl(struct backlight *bl, uint8_t enable)
+ 	if (bl->bl_interface_type == BL_DCS)
+ 		return 0;
+ 
+-	if (!(((HW_PLATFORM_SUBTYPE_8909_PM660 == platform_subtype) ||
+-		(HW_PLATFORM_SUBTYPE_8909_PM660_V1 == platform_subtype) ||
+-		(HW_PLATFORM_SUBTYPE_8909_COMPAL_ALPHA == platform_subtype)) &&
+-		((MSM8909W == platform) || (APQ8009W == platform)) &&
+-		(HW_PLATFORM_MTP == hw_id))) {
++#if WITH_LK2ND_M20T
++	/*
++	 * The M20-T routes its backlight PWM through PMIC GPIO2 (stock DT:
++	 * qcom,mdss-dsi-pwm-gpio). Driving the generic MPP LPG here energises
++	 * whatever is wired to that MPP on this board - it vibrates the motor.
++	 * Backlight enable via the bkl GPIO below only.
++	 */
++	(void)platform_subtype;
++	(void)platform;
++	(void)hw_id;
++	if (0) {
+ 		struct pm8x41_mpp mpp;
+ 		struct board_pmic_data pmic_info;
+ 		int rc;
+@@ -356,6 +371,17 @@ int target_panel_reset(uint8_t enable, struct panel_reset_sequence *resetseq,
  			gpio_set(enable_gpio.pin_id, 2);
  		}
  
